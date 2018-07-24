@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_timer.c 4388 2013-02-27 10:41:22Z ming $ */
 /* 
  * Copyright (C) 2009-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -71,7 +71,7 @@ extern pj_bool_t pjsip_use_compact_form;
 /* Local functions & vars */
 static void stop_timer(pjsip_inv_session *inv);
 static void start_timer(pjsip_inv_session *inv);
-static pj_bool_t is_initialized;
+static pj_bool_t is_initialized[PJSUA_MAX_INSTANCES];
 const pjsip_method pjsip_update_method = { PJSIP_OTHER_METHOD, {"UPDATE", 6}};
 /*
  * Session-Expires header vptr.
@@ -329,7 +329,11 @@ static void timer_cb(pj_timer_heap_t *timer_heap, struct pj_timer_entry *entry)
     pj_status_t status;
     pj_bool_t as_refresher;
 
+	int inst_id;
+
     pj_assert(inv);
+
+	inst_id = inv->pool->factory->inst_id;
 
     inv->timer->timer.id = 0;
 
@@ -379,7 +383,7 @@ static void timer_cb(pj_timer_heap_t *timer_heap, struct pj_timer_entry *entry)
 	    if (inv->timer->with_sdp) {
 		pjmedia_sdp_neg_get_active_local(inv->neg, &offer);
 	    }
-	    status = pjsip_inv_update(inv, NULL, offer, &tdata);
+	    status = pjsip_inv_update(inst_id, inv, NULL, offer, &tdata);
 	} else {
 	    /* Create re-INVITE without modifying session */
 	    pjsip_msg_body *body;
@@ -411,7 +415,7 @@ static void timer_cb(pj_timer_heap_t *timer_heap, struct pj_timer_entry *entry)
 	pj_time_val now;
 
 	/* Refreshee, terminate the session */
-	status = pjsip_inv_end_session(inv, PJSIP_SC_REQUEST_TIMEOUT, 
+	status = pjsip_inv_end_session(inst_id, inv, PJSIP_SC_REQUEST_TIMEOUT, 
 				       NULL, &tdata);
 
 	pj_gettimeofday(&now);
@@ -427,7 +431,7 @@ static void timer_cb(pj_timer_heap_t *timer_heap, struct pj_timer_entry *entry)
 
     /* Send message, if any */
     if (tdata && status == PJ_SUCCESS) {
-	status = pjsip_inv_send_msg(inv, tdata);
+	status = pjsip_inv_send_msg(inst_id, inv, tdata);
     }
 
     /* Print error message, if any */
@@ -495,9 +499,11 @@ static void stop_timer(pjsip_inv_session *inv)
 }
 
 /* Deinitialize Session Timers */
-static void pjsip_timer_deinit_module(void)
+static void pjsip_timer_deinit_module(pjsip_endpoint *endpt)
 {
-    is_initialized = PJ_FALSE;
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
+    PJ_TODO(provide_initialized_flag_for_each_endpoint);
+    is_initialized[inst_id] = PJ_FALSE;
 }
 
 /*
@@ -507,19 +513,23 @@ PJ_DEF(pj_status_t) pjsip_timer_init_module(pjsip_endpoint *endpt)
 {
     pj_status_t status;
 
+	int inst_id;
+
     PJ_ASSERT_RETURN(endpt, PJ_EINVAL);
 
-    if (is_initialized)
+	inst_id = pjsip_endpt_get_inst_id(endpt);
+
+    if (is_initialized[inst_id]) //INST_TODO
 	return PJ_SUCCESS;
 
     /* Register Session-Expires header parser */
-    status = pjsip_register_hdr_parser( STR_SE.ptr, STR_SHORT_SE.ptr, 
+    status = pjsip_register_hdr_parser( inst_id, STR_SE.ptr, STR_SHORT_SE.ptr, 
 				        &parse_hdr_se);
     if (status != PJ_SUCCESS)
 	return status;
 
     /* Register Min-SE header parser */
-    status = pjsip_register_hdr_parser( STR_MIN_SE.ptr, NULL, 
+    status = pjsip_register_hdr_parser( inst_id, STR_MIN_SE.ptr, NULL, 
 				        &parse_hdr_min_se);
     if (status != PJ_SUCCESS)
 	return status;
@@ -531,7 +541,7 @@ PJ_DEF(pj_status_t) pjsip_timer_init_module(pjsip_endpoint *endpt)
 	return status;
 
     /* Register deinit module to be executed when PJLIB shutdown */
-    if (pj_atexit(&pjsip_timer_deinit_module) != PJ_SUCCESS) {
+    if (pjsip_endpt_atexit(endpt, &pjsip_timer_deinit_module) != PJ_SUCCESS) {
 	/* Failure to register this function may cause this module won't 
 	 * work properly when the stack is restarted (without quitting 
 	 * application).
@@ -540,7 +550,7 @@ PJ_DEF(pj_status_t) pjsip_timer_init_module(pjsip_endpoint *endpt)
 	PJ_LOG(1, (THIS_FILE, "Failed to register Session Timer deinit."));
     }
 
-    is_initialized = PJ_TRUE;
+    is_initialized[inst_id] = PJ_TRUE;
 
     return PJ_SUCCESS;
 }
@@ -568,7 +578,7 @@ PJ_DEF(pj_status_t) pjsip_timer_init_session(
 {
     pjsip_timer_setting *s;
 
-    pj_assert(is_initialized);
+    pj_assert(is_initialized[inv->pool->factory->inst_id]);
     PJ_ASSERT_RETURN(inv, PJ_EINVAL);
 
     /* Allocate and/or reset Session Timers structure */
@@ -604,7 +614,7 @@ PJ_DEF(pjsip_sess_expires_hdr*) pjsip_sess_expires_hdr_create(
     pjsip_sess_expires_hdr *hdr = PJ_POOL_ZALLOC_T(pool,
 						   pjsip_sess_expires_hdr);
 
-    pj_assert(is_initialized);
+    pj_assert(is_initialized[pool->factory->inst_id]);
 
     hdr->type = PJSIP_H_OTHER;
     hdr->name = STR_SE;
@@ -623,7 +633,7 @@ PJ_DEF(pjsip_min_se_hdr*) pjsip_min_se_hdr_create(pj_pool_t *pool)
 {
     pjsip_min_se_hdr *hdr = PJ_POOL_ZALLOC_T(pool, pjsip_min_se_hdr);
 
-    pj_assert(is_initialized);
+    pj_assert(is_initialized[pool->factory->inst_id]);
 
     hdr->type = PJSIP_H_OTHER;
     hdr->name = STR_MIN_SE;
@@ -647,7 +657,7 @@ PJ_DEF(pj_status_t) pjsip_timer_update_req(pjsip_inv_session *inv,
     if ((inv->options & PJSIP_INV_SUPPORT_TIMER) == 0)
 	return PJ_SUCCESS;
 
-    pj_assert(is_initialized);
+    pj_assert(is_initialized[inv->pool->factory->inst_id]);
 
     /* Make sure Session Timers is initialized */
     if (inv->timer == NULL)
@@ -689,14 +699,18 @@ PJ_DEF(pj_status_t) pjsip_timer_process_resp(pjsip_inv_session *inv,
 {
     const pjsip_msg *msg;
 
+	int inst_id;
+
     PJ_ASSERT_ON_FAIL(inv && rdata,
 	{if(st_code)*st_code=PJSIP_SC_INTERNAL_SERVER_ERROR;return PJ_EINVAL;});
+
+	inst_id = inv->pool->factory->inst_id;
 
     /* Check if Session Timers is supported */
     if ((inv->options & PJSIP_INV_SUPPORT_TIMER) == 0)
 	return PJ_SUCCESS;
 
-    pj_assert(is_initialized);
+    pj_assert(is_initialized[inst_id]);
 
     msg = rdata->msg_info.msg;
     pj_assert(msg->type == PJSIP_RESPONSE_MSG);
@@ -769,7 +783,7 @@ PJ_DEF(pj_status_t) pjsip_timer_process_resp(pjsip_inv_session *inv,
 
 	/* Restart UAC */
 	pjsip_inv_uac_restart(inv, PJ_FALSE);
-	pjsip_inv_send_msg(inv, tdata);
+	pjsip_inv_send_msg(inst_id, inv, tdata);
 
 	return PJ_SUCCESS;
 
@@ -897,14 +911,18 @@ PJ_DEF(pj_status_t) pjsip_timer_process_req(pjsip_inv_session *inv,
     const pjsip_msg *msg;
     unsigned min_se;
 
+	int inst_id;
+
     PJ_ASSERT_ON_FAIL(inv && rdata,
 	{if(st_code)*st_code=PJSIP_SC_INTERNAL_SERVER_ERROR;return PJ_EINVAL;});
+
+	inst_id = inv->pool->factory->inst_id;
 
     /* Check if Session Timers is supported */
     if ((inv->options & PJSIP_INV_SUPPORT_TIMER) == 0)
 	return PJ_SUCCESS;
 
-    pj_assert(is_initialized);
+    pj_assert(is_initialized[inst_id]);
 
     msg = rdata->msg_info.msg;
     pj_assert(msg->type == PJSIP_REQUEST_MSG);
@@ -1014,11 +1032,15 @@ PJ_DEF(pj_status_t) pjsip_timer_update_resp(pjsip_inv_session *inv,
 {
     pjsip_msg *msg;
 
+	int inst_id;
+
     /* Check if Session Timers is supported */
     if ((inv->options & PJSIP_INV_SUPPORT_TIMER) == 0)
 	return PJ_SUCCESS;
 
-    pj_assert(is_initialized);
+	inst_id = inv->pool->factory->inst_id;
+
+    pj_assert(is_initialized[inst_id]);
     PJ_ASSERT_RETURN(inv && tdata, PJ_EINVAL);
 
     msg = tdata->msg;
@@ -1028,6 +1050,33 @@ PJ_DEF(pj_status_t) pjsip_timer_update_resp(pjsip_inv_session *inv,
 	if (inv->timer && inv->timer->active) {
 	    /* Add Session-Expires header and start the timer */
 	    add_timer_headers(inv, tdata, PJ_TRUE, PJ_FALSE);
+
+	    /* Add 'timer' to Require header (see ticket #1560). */
+	    if (inv->timer->refresher == TR_UAC) {
+		pjsip_require_hdr *req_hdr;
+		pj_bool_t req_hdr_has_timer = PJ_FALSE;
+
+		req_hdr = (pjsip_require_hdr*)
+			   pjsip_msg_find_hdr(tdata->msg, PJSIP_H_REQUIRE,
+					      NULL);
+		if (req_hdr == NULL) {
+		    req_hdr = pjsip_require_hdr_create(tdata->pool);
+		    PJ_ASSERT_RETURN(req_hdr, PJ_ENOMEM);
+		    pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr*)req_hdr);
+		} else {
+		    unsigned i;
+		    for (i = 0; i < req_hdr->count; ++i) {
+			if (pj_stricmp(&req_hdr->values[i], &STR_TIMER)) {
+			    req_hdr_has_timer = PJ_TRUE;
+			    break;
+			}
+		    }
+		}
+		if (!req_hdr_has_timer)
+		    req_hdr->values[req_hdr->count++] = STR_TIMER;
+	    }
+	    
+	    /* Finally, start timer. */
 	    start_timer(inv);
 	}
     } 

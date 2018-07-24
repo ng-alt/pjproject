@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_transport_udp.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -32,6 +32,9 @@
 
 
 #define THIS_FILE   "sip_transport_udp.c"
+#if PJ_ANDROID==1
+#include <j_log.h>
+#endif
 
 /**
  * These are the target values for socket send and receive buffer sizes,

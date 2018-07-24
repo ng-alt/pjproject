@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -104,7 +104,7 @@ static pj_status_t init_report(void)
     
     pj_ansi_sprintf(tmp, "pjsip-static-bench-%s-%s.htm", PJ_OS_NAME, PJ_CC_NAME);
 
-    status = pj_file_open(NULL, tmp, PJ_O_WRONLY, &fd_report);
+    status = pj_file_open(NULL, tmp, PJ_O_WRONLY, &fd_report, NULL);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -237,10 +237,10 @@ int test_main(void)
 #endif	/* INCLUDE_TSX_TEST */
     int line;
 
-    pj_log_set_level(log_level);
+    pj_log_set_level(0, log_level);
     pj_log_set_decor(param_log_decor);
 
-    if ((rc=pj_init()) != PJ_SUCCESS) {
+    if ((rc=pj_init(0)) != PJ_SUCCESS) {
 	app_perror("pj_init", rc);
 	return rc;
     }
@@ -256,7 +256,7 @@ int test_main(void)
 
     pj_dump_config();
 
-    pj_caching_pool_init( &caching_pool, &pj_pool_factory_default_policy, 
+    pj_caching_pool_init( 0, &caching_pool, &pj_pool_factory_default_policy,
 			  PJSIP_TEST_MEM_SIZE );
 
     rc = pjsip_endpt_create(&caching_pool.factory, "endpt", &endpt);

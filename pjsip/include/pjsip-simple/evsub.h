@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: evsub.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -493,6 +493,16 @@ PJ_DECL(void) pjsip_evsub_set_mod_data( pjsip_evsub *sub, unsigned mod_id,
  * @return		Data previously set at the specified id.
  */
 PJ_DECL(void*) pjsip_evsub_get_mod_data( pjsip_evsub *sub, unsigned mod_id );
+
+
+/**
+ * Get event subscription's pjsip_endpoint.
+ *
+ * @param sub		The event subscription.
+ *
+ * @return		Data previously set at the specified id.
+ */
+PJ_DECL(void*) pjsip_evsub_get_endpt( pjsip_evsub *sub );
 
 
 

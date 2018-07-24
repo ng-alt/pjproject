@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pjsua_internal.h 4389 2013-02-27 10:44:04Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -43,6 +43,14 @@ typedef enum pjsua_med_tp_st
 
 } pjsua_med_tp_st;
 
+//#define UDT_MAX_PKT_LEN 1600
+typedef struct recv_buff
+{
+	PJ_DECL_LIST_MEMBER(struct recv_buff);
+	pj_uint8_t   buff[UDT_MAX_PKT_LEN];
+	pj_ssize_t   len;
+} recv_buff;
+
 /** 
  * Structure to be attached to invite dialog. 
  * Given a dialog "dlg", application can retrieve this structure
@@ -50,6 +58,7 @@ typedef enum pjsua_med_tp_st
  */
 typedef struct pjsua_call
 {
+	pjsua_inst_id    inst_id;
     unsigned		 index;	    /**< Index in pjsua array.		    */
     pjsip_inv_session	*inv;	    /**< The invite session.		    */
     void		*user_data; /**< User/application data.		    */
@@ -80,7 +89,7 @@ typedef struct pjsua_call
     pjsip_evsub		*xfer_sub;  /**< Xfer server subscription, if this
 					 call was triggered by xfer.	    */
     pjmedia_transport	*med_tp;    /**< Current media transport.	    */
-    pj_status_t		 med_tp_ready;/**< Media transport status.	    */
+	pj_status_t		 med_tp_ready;/**< Media transport status.	    */
     pjmedia_transport	*med_orig;  /**< Original media transport	    */
     pj_bool_t		 med_tp_auto_del; /**< May delete media transport   */
     pjsua_med_tp_st	 med_tp_st; /**< Media transport state		    */
@@ -88,7 +97,8 @@ typedef struct pjsua_call
 					    (used to update ICE default
 					    address)			    */
     pj_stun_nat_type	 rem_nat_type; /**< NAT type of remote endpoint.    */
-    pjmedia_srtp_use	 rem_srtp_use; /**< Remote's SRTP usage policy.	    */
+	pjmedia_srtp_use	 rem_srtp_use; /**< Remote's SRTP usage policy.	    */
+	pjmedia_dtls_use	 rem_dtls_use; /**< Remote's DTLS usage policy.	    */
 
     char    last_text_buf_[128];    /**< Buffer for last_text.		    */
 
@@ -98,7 +108,37 @@ typedef struct pjsua_call
 	int		 retry_cnt;  /**< Retry count.			    */
         pj_bool_t        pending;    /**< Pending until CONFIRMED state     */
     } lock_codec;		     /**< Data for codec locking when answer
-					  contains multiple codecs.	    */
+							 contains multiple codecs.	    */
+	// natnl
+	pj_bool_t user_port_assigned;       // user selected port assigned
+	pj_uint16_t local_tcp_data_port;    // the user agent's local data port
+	pj_uint16_t external_tcp_data_port; // the external port for the incoming packet to local data port
+	pj_uint16_t local_tcp_ctl_port;     // the user agent's local control port
+	pj_uint16_t external_tcp_ctl_port;  // the external control port for the incoming packet to local port
+
+	struct natnl_stream *tnl_stream;
+    pj_mutex_t          *tnl_stream_lock;
+	pj_mutex_t          *tnl_stream_lock2;
+	pj_mutex_t          *tnl_stream_lock3;
+	pj_mutex_t          *tnl_stream_lock4;
+	pj_uint8_t current_action;          // DEAN, current action 0: unknown, 1: make call, 2: hangup 
+
+	// +Roger - tunnel timer
+	pj_time_val keep_alive;
+	pj_timer_entry tnl_ka_to_chk_timer;
+	pj_timer_entry tnli_idle_chk_timer;
+
+	pj_bool_t local_path_selected;
+
+	pj_uint16_t tcp_external_port;
+
+	int	user_last_code; /**<  User defined Last status code seen.		    */
+	int curr_sip_idx;   /** */
+
+	pj_sockaddr *turn_mapped_addr; // TURN tunnel mapped address.
+	int use_sctp;   
+
+	int tnl_build_spent_sec;
 
 } pjsua_call;
 
@@ -121,6 +161,7 @@ struct pjsua_srv_pres
  */
 typedef struct pjsua_acc
 {
+	pjsua_inst_id    inst_id;
     pj_pool_t	    *pool;	    /**< Pool for this account.		*/
     pjsua_acc_config cfg;	    /**< Account configuration.		*/
     pj_bool_t	     valid;	    /**< Is this account valid?		*/
@@ -219,6 +260,7 @@ typedef struct pjsua_buddy
     pj_str_t		 term_reason;/**< Subscription termination reason */
     pjsip_pres_status	 status;    /**< Buddy presence status.		*/
     pj_timer_entry	 timer;	    /**< Resubscription timer		*/
+	pjsua_inst_id    inst_id;
 } pjsua_buddy;
 
 
@@ -248,7 +290,11 @@ typedef struct pjsua_stun_resolve
 {
     PJ_DECL_LIST_MEMBER(struct pjsua_stun_resolve);
 
+	pjsua_inst_id    inst_id;
     pj_pool_t		*pool;	    /**< Pool		    */
+    int			 ref_cnt;   /**< Reference count    */
+    pj_bool_t		 destroy_flag; /**< To be destroyed */
+    pj_bool_t		 has_result;
     unsigned		 count;	    /**< # of entries	    */
     pj_str_t		*srv;	    /**< Array of entries   */
     unsigned		 idx;	    /**< Current index	    */
@@ -266,7 +312,7 @@ typedef struct pjsua_stun_resolve
  */
 struct pjsua_data
 {
-
+	pjsua_inst_id    id;        /**< Current instance id*/
     /* Control: */
     pj_caching_pool	 cp;	    /**< Global pool factory.		*/
     pj_pool_t		*pool;	    /**< pjsua's private pool.		*/
@@ -275,6 +321,8 @@ struct pjsua_data
     /* Logging: */
     pjsua_logging_config log_cfg;   /**< Current logging config.	*/
     pj_oshandle_t	 log_file;  /**<Output log file handle		*/
+	int              log_written_size; /**< Current logging size.	*/
+	pj_mutex_t		*log_mutex;	    /**< Mutex protection for this data	*/
 
     /* SIP: */
     pjsip_endpoint	*endpt;	    /**< Global endpoint.		*/
@@ -283,8 +331,9 @@ struct pjsua_data
     pjsip_tp_state_callback old_tp_cb; /**< Old transport callback.	*/
 
     /* Threading: */
-    pj_bool_t		 thread_quit_flag;  /**< Thread quit flag.	*/
-    pj_thread_t		*thread[4];	    /**< Array of threads.	*/
+	pj_bool_t		 thread_quit_flag;  /**< Thread quit flag.	*/
+	pj_thread_t		*thread[4];	    /**< Array of threads.	*/
+	pj_thread_t		*monitor_thread[4];	    /**< Array of threads.	*/
 
     /* STUN and resolver */
     pj_stun_config	 stun_cfg;  /**< Global STUN settings.		*/
@@ -349,15 +398,44 @@ struct pjsua_data
     /* File recorders: */
     unsigned		 rec_cnt;   /**< Number of file recorders.	*/
     pjsua_file_data	 recorder[PJSUA_MAX_RECORDERS];/**< Array of recs.*/
+
+	/* Tunnel timeout value in milliseconds. */
+	unsigned		 tnl_timeout_msec;
+	/* Idle timeout value in milliseconds. */
+	unsigned		 idle_timeout_msec;
+	/* stun local addr for pjstun_getmapped_addr */
+	pj_sockaddr_in	 stun_local_addr;
+	/* stun mapped addr for pjstun_getmapped_addr */
+	pj_sockaddr_in	 stun_mapped_addr;
+
+	/*0: do bzip2 compress, 1: plain text*/
+	int disable_compress;   
+	// transport cfg.
+	pjsua_transport_config  rtp_cfg;
+
+	pj_timestamp worker_thread_ts;
 };
 
 
-extern struct pjsua_data pjsua_var;
+
+extern struct pjsua_data pjsua_var[PJSUA_MAX_INSTANCES];
+
+PJ_DECL(pjsua_inst_id) alloc_inst_id(void);
+
+/**
+ * Set maximum number of the instance of pjsua
+ */
+PJ_DECL(void) set_max_instances(unsigned max_insts);
+
+/**
+ * Get maximum number of the instance of pjsua
+ */
+PJ_DECL(int) get_max_instances();
 
 /**
  * Get the instance of pjsua
  */
-PJ_DECL(struct pjsua_data*) pjsua_get_var(void);
+PJ_DECL(struct pjsua_data*) pjsua_get_var(pjsua_inst_id inst_id);
 
 
 
@@ -366,6 +444,7 @@ PJ_DECL(struct pjsua_data*) pjsua_get_var(void);
  */
 typedef struct pjsua_im_data
 {
+	pjsua_inst_id     inst_id;
     pjsua_acc_id     acc_id;
     pjsua_call_id    call_id;
     pj_str_t	     to;
@@ -382,8 +461,9 @@ PJ_INLINE(pjsua_im_data*) pjsua_im_data_dup(pj_pool_t *pool,
 {
     pjsua_im_data *dst;
 
-    dst = (pjsua_im_data*) pj_pool_alloc(pool, sizeof(*dst));
-    dst->acc_id = src->acc_id;
+	dst = (pjsua_im_data*) pj_pool_alloc(pool, sizeof(*dst));
+	dst->inst_id = src->inst_id;
+	dst->acc_id = src->acc_id;
     dst->call_id = src->call_id;
     pj_strdup_with_null(pool, &dst->to, &src->to);
     dst->user_data = src->user_data;
@@ -394,9 +474,11 @@ PJ_INLINE(pjsua_im_data*) pjsua_im_data_dup(pj_pool_t *pool,
 
 
 #if 1
-#define PJSUA_LOCK()	    pj_mutex_lock(pjsua_var.mutex)
-#define PJSUA_TRY_LOCK()    pj_mutex_trylock(pjsua_var.mutex)
-#define PJSUA_UNLOCK()	    pj_mutex_unlock(pjsua_var.mutex)
+//#define PJSUA_LOCK(inst_id)	    { PJ_LOG(2, ("PJSUA_LOCK", "%p/%s/%d thread(%s) lock", pjsua_var[inst_id].mutex, __FILE__, __LINE__, pj_thread_get_name(pj_thread_this(inst_id))));pj_mutex_lock(pjsua_var[inst_id].mutex);}
+#define PJSUA_LOCK(inst_id)	    pj_mutex_lock(pjsua_var[inst_id].mutex);
+#define PJSUA_TRY_LOCK(inst_id)    pj_mutex_trylock(pjsua_var[inst_id].mutex)
+//#define PJSUA_UNLOCK(inst_id)	    { PJ_LOG(2, ("PJSUA_UNLOCK", "%p/%s/%d thread(%s) unlock", pjsua_var[inst_id].mutex, __FILE__, __LINE__, pj_thread_get_name(pj_thread_this(inst_id))));pj_mutex_unlock(pjsua_var[inst_id].mutex);}
+#define PJSUA_UNLOCK(inst_id)	    pj_mutex_unlock(pjsua_var[inst_id].mutex);
 #else
 #define PJSUA_LOCK()
 #define PJSUA_TRY_LOCK()    PJ_SUCCESS
@@ -407,13 +489,13 @@ PJ_INLINE(pjsua_im_data*) pjsua_im_data_dup(pj_pool_t *pool,
  * STUN resolution
  */
 /* Resolve the STUN server */
-pj_status_t resolve_stun_server(pj_bool_t wait);
+pj_status_t resolve_stun_server(pjsua_inst_id inst_id, pj_bool_t wait);
 
 /** 
  * Normalize route URI (check for ";lr" and append one if it doesn't
  * exist and pjsua_config.force_lr is set.
  */
-pj_status_t normalize_route_uri(pj_pool_t *pool, pj_str_t *uri);
+pj_status_t normalize_route_uri(pjsua_inst_id inst_id, pj_pool_t *pool, pj_str_t *uri);
 
 /**
  * Handle incoming invite request.
@@ -423,32 +505,36 @@ pj_bool_t pjsua_call_on_incoming(pjsip_rx_data *rdata);
 /*
  * Media channel.
  */
-pj_status_t pjsua_media_channel_init(pjsua_call_id call_id,
+pj_status_t pjsua_media_channel_init(pjsua_inst_id inst_id,
+					 pjsua_call_id call_id,
 				     pjsip_role_e role,
 				     int security_level,
 				     pj_pool_t *tmp_pool,
 				     const pjmedia_sdp_session *rem_sdp,
 				     int *sip_err_code);
-pj_status_t pjsua_media_channel_create_sdp(pjsua_call_id call_id, 
+pj_status_t pjsua_media_channel_create_sdp(pjsua_inst_id inst_id,
+					   pjsua_call_id call_id, 
 					   pj_pool_t *pool,
 					   const pjmedia_sdp_session *rem_sdp,
 					   pjmedia_sdp_session **p_sdp,
 					   int *sip_err_code);
-pj_status_t pjsua_media_channel_update(pjsua_call_id call_id,
+pj_status_t pjsua_media_channel_update(pjsua_inst_id inst_id,
+					   pjsua_call_id call_id,
 				       const pjmedia_sdp_session *local_sdp,
 				       const pjmedia_sdp_session *remote_sdp);
-pj_status_t pjsua_media_channel_deinit(pjsua_call_id call_id);
+pj_status_t pjsua_media_channel_deinit(pjsua_inst_id inst_id,
+									   pjsua_call_id call_id);
 
 
 /**
  * Init presence.
  */
-pj_status_t pjsua_pres_init();
+pj_status_t pjsua_pres_init(pjsua_inst_id inst_id);
 
 /*
  * Start presence subsystem.
  */
-pj_status_t pjsua_pres_start(void);
+pj_status_t pjsua_pres_start(pjsua_inst_id inst_id);
 
 /**
  * Refresh presence subscriptions
@@ -458,22 +544,26 @@ void pjsua_pres_refresh(void);
 /*
  * Update server subscription (e.g. when our online status has changed)
  */
-void pjsua_pres_update_acc(int acc_id, pj_bool_t force);
+void pjsua_pres_update_acc(pjsua_inst_id inst_id,
+						   int acc_id, pj_bool_t force);
 
 /*
  * Shutdown presence.
  */
-void pjsua_pres_shutdown(unsigned flags);
+void pjsua_pres_shutdown(pjsua_inst_id inst_id,
+						 unsigned flags);
 
 /**
  * Init presence for aoocunt.
  */
-pj_status_t pjsua_pres_init_acc(int acc_id);
+pj_status_t pjsua_pres_init_acc(pjsua_inst_id inst_id,
+								int acc_id);
 
 /**
  * Send PUBLISH
  */
-pj_status_t pjsua_pres_init_publish_acc(int acc_id);
+pj_status_t pjsua_pres_init_publish_acc(pjsua_inst_id inst_id,
+										int acc_id);
 
 /**
  *  Send un-PUBLISH
@@ -483,12 +573,13 @@ void pjsua_pres_unpublish(pjsua_acc *acc, unsigned flags);
 /**
  * Terminate server subscription for the account 
  */
-void pjsua_pres_delete_acc(int acc_id, unsigned flags);
+void pjsua_pres_delete_acc(pjsua_inst_id inst_id,
+						   int acc_id, unsigned flags);
 
 /**
  * Init IM module handler to handle incoming MESSAGE outside dialog.
  */
-pj_status_t pjsua_im_init(void);
+pj_status_t pjsua_im_init(pjsua_inst_id inst_id);
 
 /**
  * Start MWI subscription
@@ -498,7 +589,7 @@ void pjsua_start_mwi(pjsua_acc *acc);
 /**
  * Init call subsystem.
  */
-pj_status_t pjsua_call_subsys_init(const pjsua_config *cfg);
+pj_status_t pjsua_call_subsys_init(pjsua_inst_id inst_id, const pjsua_config *cfg);
 
 /**
  * Start call subsystem.
@@ -508,17 +599,18 @@ pj_status_t pjsua_call_subsys_start(void);
 /**
  * Init media subsystems.
  */
-pj_status_t pjsua_media_subsys_init(const pjsua_media_config *cfg);
+pj_status_t pjsua_media_subsys_init(pjsua_inst_id inst_id,
+									const pjsua_media_config *cfg);
 
 /**
  * Start pjsua media subsystem.
  */
-pj_status_t pjsua_media_subsys_start(void);
+pj_status_t pjsua_media_subsys_start(pjsua_inst_id inst_id);
 
 /**
  * Destroy pjsua media subsystem.
  */
-pj_status_t pjsua_media_subsys_destroy(unsigned flags);
+pj_status_t pjsua_media_subsys_destroy(pjsua_inst_id inst_id, unsigned flags);
 
 /**
  * Private: check if we can accept the message.
@@ -541,11 +633,28 @@ void pjsua_im_process_pager(int call_id, const pj_str_t *from,
  */
 pjsip_accept_hdr* pjsua_im_create_accept(pj_pool_t *pool);
 
+
+/**
+ * Create rport header for MESSAGE.
+ */
+pjsip_generic_int_hdr* pjsua_im_create_rport(pj_pool_t *pool, pj_str_t *rport);
+
+/**
+ * Create timeout header for MESSAGE.
+ */
+pjsip_generic_int_hdr* pjsua_im_create_timeout(pj_pool_t *pool, pj_str_t *timeout);
+
+/**
+ * Create process name header for MESSAGE.
+ */
+pjsip_generic_int_hdr* pjsua_im_create_proc_name(pj_pool_t *pool, pj_str_t *proc_name_value);
+
 /*
  * Add additional headers etc in msg_data specified by application
  * when sending requests.
  */
-void pjsua_process_msg_data(pjsip_tx_data *tdata,
+void pjsua_process_msg_data(pjsua_inst_id inst_id,
+				pjsip_tx_data *tdata,
 			    const pjsua_msg_data *msg_data);
 
 
@@ -567,16 +676,19 @@ void pjsua_parse_media_type( pj_pool_t *pool,
 /*
  * Internal function to init transport selector from transport id.
  */
-void pjsua_init_tpselector(pjsua_transport_id tp_id,
+void pjsua_init_tpselector(pjsua_inst_id inst_id,
+			   pjsua_transport_id tp_id,
 			   pjsip_tpselector *sel);
 
 pjsip_dialog* on_dlg_forked(pjsip_dialog *first_set, pjsip_rx_data *res);
-pj_status_t acquire_call(const char *title,
+pj_status_t acquire_call(pjsua_inst_id inst_id,
+						 const char *title,
                          pjsua_call_id call_id,
                          pjsua_call **p_call,
                          pjsip_dialog **p_dlg);
 const char *good_number(char *buf, pj_int32_t val);
-void print_call(const char *title,
+void print_call(pjsua_inst_id inst_id,
+				const char *title,
                 int call_id,
                 char *buf, pj_size_t size);
 

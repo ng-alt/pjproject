@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: http_client.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -237,13 +237,13 @@ static void on_response(pj_http_req *hreq, const pj_http_resp *resp)
 }
 
 
-pj_status_t parse_url(const char *url, pj_http_url *hurl)
+pj_status_t parse_url(int inst_id, const char *url, pj_http_url *hurl)
 {
     pj_str_t surl;
     pj_status_t status;
 
     pj_cstr(&surl, url);
-    status = pj_http_req_parse_url(&surl, hurl);
+    status = pj_http_req_parse_url(inst_id, &surl, hurl);
 #ifdef VERBOSE
     if (!status) {
         printf("URL: %s\nProtocol: %.*s\nHost: %.*s\nPort: %d\nPath: %.*s\n\n",
@@ -349,7 +349,7 @@ static int parse_url_test()
 	ptd = &test_data[i];
 
 	PJ_LOG(3, (THIS_FILE, ".. %s", ptd->url));
-	status = parse_url(ptd->url, &hurl);
+	status = parse_url(0, ptd->url, &hurl);
 
 	if (status != ptd->result) {
 	    PJ_LOG(3,(THIS_FILE, "%d", status));
@@ -442,7 +442,7 @@ int http_client_test1()
     pj_cstr(&url, "http://www.teluu.com/about-us/");
 #endif
 
-    if (pj_http_req_create(pool, &url, timer_heap, ioqueue, 
+    if (pj_http_req_create(0, pool, &url, timer_heap, ioqueue, 
                            &param, &hcb, &http_req))
         return -33;
 
@@ -573,7 +573,7 @@ int http_client_test2()
                                      "Windows NT 6.0; SLCC1; "
                                      ".NET CLR 2.0.50727; "
                                      ".NET CLR 3.0.04506)");
-    if (pj_http_req_create(pool, &url, timer_heap, ioqueue, 
+    if (pj_http_req_create(0, pool, &url, timer_heap, ioqueue, 
                            &param, &hcb, &http_req))
         return -43;
 
@@ -691,7 +691,7 @@ int http_client_test_put1()
     pj_ansi_sprintf(data, "PUT test\n");
     param.reqdata.data = data;
     param.reqdata.size = length;
-    if (pj_http_req_create(pool, &url, timer_heap, ioqueue, 
+    if (pj_http_req_create(0, pool, &url, timer_heap, ioqueue, 
                            &param, &hcb, &http_req))
         return -53;
 
@@ -792,7 +792,7 @@ int http_client_test_put2()
     total_size = 15383;
     send_size = 0;
     param.reqdata.total_size = total_size;
-    if (pj_http_req_create(pool, &url, timer_heap, ioqueue, 
+    if (pj_http_req_create(0, pool, &url, timer_heap, ioqueue, 
                            &param, &hcb, &http_req))
         return -53;
 
@@ -883,7 +883,7 @@ int http_client_test_delete()
 
     pj_http_req_param_default(&param);
     pj_strset2(&param.method, (char*)"DELETE");
-    if (pj_http_req_create(pool, &url, timer_heap, ioqueue, 
+    if (pj_http_req_create(0, pool, &url, timer_heap, ioqueue, 
                            &param, &hcb, &http_req))
         return -63;
 

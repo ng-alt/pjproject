@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: encdec.c 3816 2011-10-14 04:15:15Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -231,11 +231,12 @@ int main(int argc, char *argv[])
 	return 1;
     }
 
-    CHECK( pj_init() );
+    CHECK( pj_init(0) );
     
-    pj_caching_pool_init(&cp, NULL, 0);
+    pj_caching_pool_init(0, &cp, NULL, 0);
 
-    CHECK( pjmedia_endpt_create(&cp.factory, NULL, 1, &mept) );
+//    CHECK( pjmedia_endpt_create(&cp.factory, NULL, 1, &mept) );
+    CHECK( pjmedia_endpt_create(0, &cp.factory, NULL, 1, 0, &mept) );
 
     /* Register all codecs */
 #if PJMEDIA_HAS_G711_CODEC
@@ -264,7 +265,7 @@ int main(int argc, char *argv[])
 
     pjmedia_endpt_destroy(mept);
     pj_caching_pool_destroy(&cp);
-    pj_shutdown();
+    pj_shutdown(0);
 
     if (status == PJ_SUCCESS) {
 	puts("");

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -55,24 +55,24 @@ int test_inner(void)
 
     mem = &caching_pool.factory;
 
-    pj_log_set_level(3);
+    pj_log_set_level(0, 3);
     pj_log_set_decor(param_log_decor);
 
-    rc = pj_init();
+    rc = pj_init(0);
     if (rc != 0) {
 	app_perror("pj_init() error!!", rc);
 	return rc;
     }
     
     //pj_dump_config();
-    pj_caching_pool_init( &caching_pool, NULL, 0 );
+    pj_caching_pool_init( 0, &caching_pool, NULL, 0 );
 
 #if INCLUDE_ERRNO_TEST
     DO_TEST( errno_test() );
 #endif
 
 #if INCLUDE_EXCEPTION_TEST
-    DO_TEST( exception_test() );
+    DO_TEST( exception_test(0) );
 #endif
 
 #if INCLUDE_OS_TEST
@@ -206,7 +206,7 @@ on_return:
     else
 	PJ_LOG(3,("test", "Test completed with error(s)"));
     
-    pj_shutdown();
+    pj_shutdown(0);
     
     return 0;
 }
@@ -220,15 +220,15 @@ int test_main(void)
 
     i = pj_AF_INET();
 
-    PJ_TRY {
+    PJ_TRY(0) {
         return test_inner();
     }
     PJ_CATCH_ANY {
         int id = PJ_GET_EXCEPTION();
         PJ_LOG(3,("test", "FATAL: unhandled exception id %d (%s)", 
-                  id, pj_exception_id_name(id)));
+                  id, pj_exception_id_name(0, id)));
     }
-    PJ_END;
+    PJ_END(0);
 
     return -1;
 }

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: icedemo.c 4387 2013-02-27 10:16:08Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -110,7 +110,7 @@ static void err_exit(const char *title, pj_status_t status)
 
     pj_caching_pool_destroy(&icedemo.cp);
 
-    pj_shutdown();
+    pj_shutdown(0);
 
     if (icedemo.log_fhnd) {
 	fclose(icedemo.log_fhnd);
@@ -259,9 +259,9 @@ static void cb_on_ice_complete(pj_ice_strans *ice_st,
 }
 
 /* log callback to write to file */
-static void log_func(int level, const char *data, int len)
+static void log_func(int inst_id, int level, const char *data, int len)
 {
-    pj_log_write(level, data, len);
+    pj_log_write(inst_id, level, data, len, 0);
     if (icedemo.log_fhnd) {
 	if (fwrite(data, len, 1, icedemo.log_fhnd) != 1)
 	    return;
@@ -283,12 +283,12 @@ static pj_status_t icedemo_init(void)
     }
 
     /* Initialize the libraries before anything else */
-    CHECK( pj_init() );
+    CHECK( pj_init(0) );
     CHECK( pjlib_util_init() );
     CHECK( pjnath_init() );
 
     /* Must create pool factory, where memory allocations come from */
-    pj_caching_pool_init(&icedemo.cp, NULL, 0);
+    pj_caching_pool_init(0, &icedemo.cp, NULL, 0);
 
     /* Init our ICE settings with null values */
     pj_ice_strans_cfg_default(&icedemo.ice_cfg);
@@ -614,6 +614,7 @@ static int encode_session(char buffer[], unsigned maxlen)
 	}
 
 	/* Enumerate all candidates for this component */
+	cand_cnt = PJ_ARRAY_SIZE(cand);
 	status = pj_ice_strans_enum_cands(icedemo.icest, comp+1,
 					  &cand_cnt, cand);
 	if (status != PJ_SUCCESS)

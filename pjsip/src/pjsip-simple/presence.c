@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: presence.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -693,7 +693,8 @@ static void pres_on_evsub_rx_refresh( pjsip_evsub *sub,
  * return PJ_SUCCESS if incoming request is acceptable. If return value
  *	  is not PJ_SUCCESS, res_hdr may be added with Warning header.
  */
-static pj_status_t pres_process_rx_notify( pjsip_pres *pres,
+static pj_status_t pres_process_rx_notify( int inst_id,
+					   pjsip_pres *pres,
 					   pjsip_rx_data *rdata, 
 					   int *p_st_code,
 					   pj_str_t **p_st_text,
@@ -734,7 +735,7 @@ static pj_status_t pres_process_rx_notify( pjsip_pres *pres,
 	mpart = pjsip_multipart_find_part(rdata->msg_info.msg->body,
 					  &ctype, NULL);
 	if (mpart) {
-	    status = pjsip_pres_parse_pidf2((char*)mpart->body->data,
+	    status = pjsip_pres_parse_pidf2(inst_id, (char*)mpart->body->data,
 					    mpart->body->len, pres->tmp_pool,
 					    &pres->tmp_status);
 	}
@@ -745,7 +746,7 @@ static pj_status_t pres_process_rx_notify( pjsip_pres *pres,
 	    mpart = pjsip_multipart_find_part(rdata->msg_info.msg->body,
 					      &ctype, NULL);
 	    if (mpart) {
-		status = pjsip_pres_parse_xpidf2((char*)mpart->body->data,
+		status = pjsip_pres_parse_xpidf2(inst_id, (char*)mpart->body->data,
 						 mpart->body->len,
 						 pres->tmp_pool,
 						 &pres->tmp_status);
@@ -758,14 +759,14 @@ static pj_status_t pres_process_rx_notify( pjsip_pres *pres,
     if (pj_stricmp(&ctype_hdr->media.type, &STR_APPLICATION)==0 &&
 	pj_stricmp(&ctype_hdr->media.subtype, &STR_PIDF_XML)==0)
     {
-	status = pjsip_pres_parse_pidf( rdata, pres->tmp_pool,
+	status = pjsip_pres_parse_pidf( inst_id, rdata, pres->tmp_pool,
 					&pres->tmp_status);
     }
     else 
     if (pj_stricmp(&ctype_hdr->media.type, &STR_APPLICATION)==0 &&
 	pj_stricmp(&ctype_hdr->media.subtype, &STR_XPIDF_XML)==0)
     {
-	status = pjsip_pres_parse_xpidf( rdata, pres->tmp_pool,
+	status = pjsip_pres_parse_xpidf( inst_id, rdata, pres->tmp_pool,
 					 &pres->tmp_status);
     }
     else
@@ -828,11 +829,13 @@ static void pres_on_evsub_rx_notify( pjsip_evsub *sub,
     pjsip_pres *pres;
     pj_status_t status;
 
+	int inst_id = rdata->tp_info.pool->factory->inst_id;
+
     pres = (pjsip_pres*) pjsip_evsub_get_mod_data(sub, mod_presence.id);
     PJ_ASSERT_ON_FAIL(pres!=NULL, {return;});
 
     if (rdata->msg_info.msg->body) {
-	status = pres_process_rx_notify( pres, rdata, p_st_code, p_st_text,
+	status = pres_process_rx_notify( inst_id, pres, rdata, p_st_code, p_st_text,
 					 res_hdr );
 	if (status != PJ_SUCCESS)
 	    return;

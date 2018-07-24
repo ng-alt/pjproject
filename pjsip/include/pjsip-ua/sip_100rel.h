@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_100rel.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -153,11 +153,12 @@ PJ_DECL(pj_status_t) pjsip_100rel_init_module(pjsip_endpoint *endpt);
  * be called internally by the invite session if it detects that the
  * session needs 100rel support.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param inv		The invite session.
  *
  * @return		PJ_SUCCESS on successful.
  */
-PJ_DECL(pj_status_t) pjsip_100rel_attach(pjsip_inv_session *inv);
+PJ_DECL(pj_status_t) pjsip_100rel_attach(int inst_id, pjsip_inv_session *inv);
 
 
 /**
@@ -228,11 +229,12 @@ PJ_DECL(pj_status_t) pjsip_100rel_tx_response(pjsip_inv_session *inv,
 /**
  * Notify 100rel module that the invite session has been disconnected.
  *
+ * @param inst_id	The instance id of pjsua.
  * @param inv		The invite session.
  *
  * @return		PJ_SUCCESS on successful.
  */
-PJ_DECL(pj_status_t) pjsip_100rel_end_session(pjsip_inv_session *inv);
+PJ_DECL(pj_status_t) pjsip_100rel_end_session(int inst_id, pjsip_inv_session *inv);
 
 
 PJ_END_DECL

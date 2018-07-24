@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: mips_test.c 3816 2011-10-14 04:15:15Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -758,7 +758,7 @@ static pjmedia_port* codec_encode_decode( pj_pool_t *pool,
     cp->base.on_destroy = &codec_on_destroy;
     cp->codec_deinit = codec_deinit;
 
-    status = pjmedia_endpt_create(mem, NULL, 0, &cp->endpt);
+    status = pjmedia_endpt_create(0, mem, NULL, 0, 0, &cp->endpt);
     if (status != PJ_SUCCESS)
 	return NULL;
 
@@ -1702,7 +1702,7 @@ static pjmedia_port* create_stream( pj_pool_t *pool,
     te->custom_deinit = &stream_port_custom_deinit;
     sp->codec_deinit = codec_deinit;
 
-    status = pjmedia_endpt_create(mem, NULL, 0, &sp->endpt);
+    status = pjmedia_endpt_create(0, mem, NULL, 0, 0, &sp->endpt);
     if (status != PJ_SUCCESS)
 	return NULL;
 
@@ -1743,6 +1743,7 @@ static pjmedia_port* create_stream( pj_pool_t *pool,
     if (status != PJ_SUCCESS)
 	return NULL;
 
+#if defined(PJMEDIA_HAS_SRTP) && (PJMEDIA_HAS_SRTP != 0)
     if (srtp_enabled) {
 	pjmedia_srtp_setting opt;
 	pjmedia_srtp_crypto crypto;
@@ -1775,6 +1776,7 @@ static pjmedia_port* create_stream( pj_pool_t *pool,
 
 	sp->transport = srtp;
     }
+#endif
 
     /* Create stream */
     status = pjmedia_stream_create(sp->endpt, pool, &si, sp->transport, NULL, 

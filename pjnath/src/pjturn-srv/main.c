@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: main.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -128,14 +128,14 @@ int main()
     pj_turn_listener *listener;
     pj_status_t status;
 
-    status = pj_init();
+    status = pj_init(0);
     if (status != PJ_SUCCESS)
 	return err("pj_init() error", status);
 
     pjlib_util_init();
     pjnath_init();
 
-    pj_caching_pool_init(&g_cp, NULL, 0);
+    pj_caching_pool_init(0, &g_cp, NULL, 0);
 
     pj_turn_auth_init(REALM);
 
@@ -161,13 +161,13 @@ int main()
 
     puts("Server is running");
 
-    pj_log_set_level(LOG_LEVEL);
+    pj_log_set_level(0, LOG_LEVEL);
 
     console_main(srv);
 
     pj_turn_srv_destroy(srv);
     pj_caching_pool_destroy(&g_cp);
-    pj_shutdown();
+    pj_shutdown(0);
 
     return 0;
 }

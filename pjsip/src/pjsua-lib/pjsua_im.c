@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pjsua_im.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -40,13 +40,19 @@ const pjsip_method pjsip_message_method =
     { "MESSAGE", 7 }
 };
 
+const pj_str_t im_rport_hdr = {"Rport", 5};
+
+const pj_str_t im_proc_name_hdr = {"Pname", 5};
+
+const pj_str_t im_timeout_hdr = {"Timeout", 7};
+
 
 /* Proto */
 static pj_bool_t im_on_rx_request(pjsip_rx_data *rdata);
 
 
 /* The module instance. */
-static pjsip_module mod_pjsua_im = 
+static pjsip_module mod_pjsua_im_initializer = 
 {
     NULL, NULL,				/* prev, next.		*/
     { "mod-pjsua-im", 12 },		/* Name.		*/
@@ -64,12 +70,28 @@ static pjsip_module mod_pjsua_im =
 
 };
 
+static pjsip_module mod_pjsua_im[PJSUA_MAX_INSTANCES];
 
 /* MIME constants. */
 static const pj_str_t STR_MIME_APP	   = { "application", 11 };
 static const pj_str_t STR_MIME_ISCOMPOSING = { "im-iscomposing+xml", 18 };
 static const pj_str_t STR_MIME_TEXT	   = { "text", 4 };
 static const pj_str_t STR_MIME_PLAIN	   = { "plain", 5 };
+static int is_initialized;
+
+static void mod_pjsua_im_initialize()
+{
+	int i;
+	if(is_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(mod_pjsua_im); i++)
+	{
+		mod_pjsua_im[i] = mod_pjsua_im_initializer;
+	}
+
+	is_initialized = 1;
+}
 
 
 /* Check if content type is acceptable */
@@ -98,6 +120,45 @@ pjsip_accept_hdr* pjsua_im_create_accept(pj_pool_t *pool)
     accept->count = 2;
 
     return accept;
+}
+
+/**
+ * Create rport header for MESSAGE.
+ */
+pjsip_generic_int_hdr* pjsua_im_create_rport(pj_pool_t *pool, pj_str_t *rport_value)
+{
+    /* Create Accept header. */
+    pjsip_generic_int_hdr *rport;
+
+    rport = pjsip_generic_string_hdr_create(pool, &im_rport_hdr, rport_value);
+
+    return rport;
+}
+
+/**
+ * Create timeout header for MESSAGE.
+ */
+pjsip_generic_int_hdr* pjsua_im_create_timtout(pj_pool_t *pool, pj_str_t *timeout_value)
+{
+    /* Create Accept header. */
+    pjsip_generic_int_hdr *timeout;
+
+    timeout = pjsip_generic_string_hdr_create(pool, &im_timeout_hdr, timeout_value);
+
+    return timeout;
+}
+
+/**
+ * Create process name header for MESSAGE.
+ */
+pjsip_generic_int_hdr* pjsua_im_create_proc_name(pj_pool_t *pool, pj_str_t *proc_name_value)
+{
+    /* Create Accept header. */
+    pjsip_generic_int_hdr *proc_name;
+
+    proc_name = pjsip_generic_string_hdr_create(pool, &im_proc_name_hdr, proc_name_value);
+
+    return proc_name;
 }
 
 /**
@@ -156,7 +217,8 @@ void pjsua_im_process_pager(int call_id, const pj_str_t *from,
 {
     pjsip_contact_hdr *contact_hdr;
     pj_str_t contact;
-    pjsip_msg_body *body = rdata->msg_info.msg->body;
+	pjsip_msg_body *body = rdata->msg_info.msg->body;
+	pjsua_inst_id inst_id = rdata->tp_info.pool->factory->inst_id;
 
 #if 0
     /* Ticket #693: allow incoming MESSAGE without message body */
@@ -186,7 +248,7 @@ void pjsua_im_process_pager(int call_id, const pj_str_t *from,
 	pj_status_t status;
 	pj_bool_t is_typing;
 
-	status = pjsip_iscomposing_parse(rdata->tp_info.pool, (char*)body->data,
+	status = pjsip_iscomposing_parse(inst_id, rdata->tp_info.pool, (char*)body->data,
 					 body->len, &is_typing, NULL, NULL,
 					 NULL );
 	if (status != PJ_SUCCESS) {
@@ -194,23 +256,23 @@ void pjsua_im_process_pager(int call_id, const pj_str_t *from,
 	    return;
 	}
 
-	if (pjsua_var.ua_cfg.cb.on_typing) {
-	    (*pjsua_var.ua_cfg.cb.on_typing)(call_id, from, to, &contact,
+	if (pjsua_var[inst_id].ua_cfg.cb.on_typing) {
+	    (*pjsua_var[inst_id].ua_cfg.cb.on_typing)(inst_id, call_id, from, to, &contact,
 					     is_typing);
 	}
 
-	if (pjsua_var.ua_cfg.cb.on_typing2) {
+	if (pjsua_var[inst_id].ua_cfg.cb.on_typing2) {
 	    pjsua_acc_id acc_id;
 
 	    if (call_id == PJSUA_INVALID_ID) {
 		acc_id = pjsua_acc_find_for_incoming(rdata);
 	    } else {
-		pjsua_call *call = &pjsua_var.calls[call_id];
+		pjsua_call *call = &pjsua_var[inst_id].calls[call_id];
 		acc_id = call->acc_id;
 	    }
 
 
-	    (*pjsua_var.ua_cfg.cb.on_typing2)(call_id, from, to, &contact,
+	    (*pjsua_var[inst_id].ua_cfg.cb.on_typing2)(inst_id, call_id, from, to, &contact,
 					      is_typing, rdata, acc_id);
 	}
 
@@ -243,22 +305,22 @@ void pjsua_im_process_pager(int call_id, const pj_str_t *from,
 	    text_body.slen = mime_type.slen = 0;
 	}
 
-	if (pjsua_var.ua_cfg.cb.on_pager) {
-	    (*pjsua_var.ua_cfg.cb.on_pager)(call_id, from, to, &contact, 
+	if (pjsua_var[inst_id].ua_cfg.cb.on_pager) {
+	    (*pjsua_var[inst_id].ua_cfg.cb.on_pager)(inst_id, call_id, from, to, &contact, 
 					    &mime_type, &text_body);
 	}
 
-	if (pjsua_var.ua_cfg.cb.on_pager2) {
+	if (pjsua_var[inst_id].ua_cfg.cb.on_pager2) {
 	    pjsua_acc_id acc_id;
 
 	    if (call_id == PJSUA_INVALID_ID) {
 		acc_id = pjsua_acc_find_for_incoming(rdata);
 	    } else {
-		pjsua_call *call = &pjsua_var.calls[call_id];
+		pjsua_call *call = &pjsua_var[inst_id].calls[call_id];
 		acc_id = call->acc_id;
 	    }
 
-	    (*pjsua_var.ua_cfg.cb.on_pager2)(call_id, from, to, &contact, 
+	    (*pjsua_var[inst_id].ua_cfg.cb.on_pager2)(inst_id, call_id, from, to, &contact, 
 					     &mime_type, &text_body, rdata,
 					     acc_id);
 	}
@@ -275,6 +337,8 @@ static pj_bool_t im_on_rx_request(pjsip_rx_data *rdata)
     pjsip_accept_hdr *accept_hdr;
     pjsip_msg *msg;
     pj_status_t status;
+
+	pjsua_inst_id inst_id = rdata->tp_info.pool->factory->inst_id;
 
     msg = rdata->msg_info.msg;
 
@@ -297,17 +361,20 @@ static pj_bool_t im_on_rx_request(pjsip_rx_data *rdata)
 	pj_list_init(&hdr_list);
 	pj_list_push_back(&hdr_list, accept_hdr);
 
-	pjsip_endpt_respond_stateless(pjsua_var.endpt, rdata, 
+	pjsip_endpt_respond_stateless(pjsua_var[inst_id].endpt, rdata, 
 				      PJSIP_SC_NOT_ACCEPTABLE_HERE, NULL, 
-				      &hdr_list, NULL);
+					  &hdr_list, NULL);
 	return PJ_TRUE;
     }
     
-    /* Respond with 200 first, so that remote doesn't retransmit in case
+    /* Respond with 183 first, so that remote doesn't retransmit in case
      * the UI takes too long to process the message. 
      */
-    status = pjsip_endpt_respond( pjsua_var.endpt, NULL, rdata, 200, NULL,
-				  NULL, NULL, NULL);
+    //status = pjsip_endpt_respond( pjsua_var[inst_id].endpt, NULL, rdata, 200, NULL,
+	//			  NULL, NULL, NULL);
+	// DEAN. Use stateless function to avoid 
+	status = pjsip_endpt_respond_stateless(pjsua_var[inst_id].endpt, rdata, 183, NULL, NULL,
+					NULL);
 
     /* For the source URI, we use Contact header if present, since
      * Contact header contains the port number information. If this is
@@ -341,6 +408,7 @@ static pj_bool_t im_on_rx_request(pjsip_rx_data *rdata)
 static void im_callback(void *token, pjsip_event *e)
 {
     pjsua_im_data *im_data = (pjsua_im_data*) token;
+	pjsua_inst_id inst_id = im_data->inst_id;
 
     if (e->type == PJSIP_EVENT_TSX_STATE) {
 
@@ -358,19 +426,19 @@ static void im_callback(void *token, pjsip_event *e)
 	    pjsip_rx_data *rdata = e->body.tsx_state.src.rdata;
 	    pjsip_tx_data *tdata;
 	    pjsip_auth_clt_sess auth;
-	    pj_status_t status;
+		pj_status_t status;
 
 	    PJ_LOG(4,(THIS_FILE, "Resending IM with authentication"));
 
 	    /* Create temporary authentication session */
-	    pjsip_auth_clt_init(&auth,pjsua_var.endpt,rdata->tp_info.pool, 0);
+	    pjsip_auth_clt_init(&auth, pjsua_var[inst_id].endpt, rdata->tp_info.pool, 0);
     
 	    pjsip_auth_clt_set_credentials(&auth, 
-		pjsua_var.acc[im_data->acc_id].cred_cnt,
-		pjsua_var.acc[im_data->acc_id].cred);
+		pjsua_var[inst_id].acc[im_data->acc_id].cred_cnt,
+		pjsua_var[inst_id].acc[im_data->acc_id].cred);
 
 	    pjsip_auth_clt_set_prefs(&auth, 
-				     &pjsua_var.acc[im_data->acc_id].cfg.auth_pref);
+				     &pjsua_var[inst_id].acc[im_data->acc_id].cfg.auth_pref);
 
 	    status = pjsip_auth_clt_reinit_req(&auth, rdata, tsx->last_tx,
 					       &tdata);
@@ -384,7 +452,7 @@ static void im_callback(void *token, pjsip_event *e)
 		PJSIP_MSG_CSEQ_HDR(tdata->msg)->cseq++;
 
 		/* Re-send request */
-		status = pjsip_endpt_send_request( pjsua_var.endpt, tdata, -1,
+		status = pjsip_endpt_send_request( pjsua_var[inst_id].endpt, tdata, -1,
 						   im_data2, &im_callback);
 		if (status == PJ_SUCCESS) {
 		    /* Done */
@@ -406,17 +474,18 @@ static void im_callback(void *token, pjsip_event *e)
 		      tsx->status_text.ptr));
 	}
 
-	if (pjsua_var.ua_cfg.cb.on_pager_status) {
-	    pjsua_var.ua_cfg.cb.on_pager_status(im_data->call_id, 
-					        &im_data->to,
+	if (pjsua_var[inst_id].ua_cfg.cb.on_pager_status) {
+	    pjsua_var[inst_id].ua_cfg.cb.on_pager_status(inst_id,
+						im_data->call_id, 
+					    &im_data->to,
 						&im_data->body,
 						im_data->user_data,
 						(pjsip_status_code) 
-						    tsx->status_code,
+						   tsx->status_code,
 						&tsx->status_text);
 	}
 
-	if (pjsua_var.ua_cfg.cb.on_pager_status2) {
+	if (pjsua_var[inst_id].ua_cfg.cb.on_pager_status2) {
 	    pjsip_rx_data *rdata;
 
 	    if (e->body.tsx_state.type == PJSIP_EVENT_RX_MSG)
@@ -424,8 +493,9 @@ static void im_callback(void *token, pjsip_event *e)
 	    else
 		rdata = NULL;
 
-	    pjsua_var.ua_cfg.cb.on_pager_status2(im_data->call_id, 
-					         &im_data->to,
+	    pjsua_var[inst_id].ua_cfg.cb.on_pager_status2(inst_id, 
+						 im_data->call_id, 
+					     &im_data->to,
 					 	 &im_data->body,
 						 im_data->user_data,
 						 (pjsip_status_code) 
@@ -444,6 +514,7 @@ static void im_callback(void *token, pjsip_event *e)
 static void typing_callback(void *token, pjsip_event *e)
 {
     pjsua_im_data *im_data = (pjsua_im_data*) token;
+	pjsua_inst_id inst_id = im_data->inst_id;
 
     if (e->type == PJSIP_EVENT_TSX_STATE) {
 
@@ -465,14 +536,14 @@ static void typing_callback(void *token, pjsip_event *e)
 	    PJ_LOG(4,(THIS_FILE, "Resending IM with authentication"));
 
 	    /* Create temporary authentication session */
-	    pjsip_auth_clt_init(&auth,pjsua_var.endpt,rdata->tp_info.pool, 0);
+	    pjsip_auth_clt_init(&auth,pjsua_var[inst_id].endpt,rdata->tp_info.pool, 0);
     
 	    pjsip_auth_clt_set_credentials(&auth, 
-		pjsua_var.acc[im_data->acc_id].cred_cnt,
-		pjsua_var.acc[im_data->acc_id].cred);
+		pjsua_var[inst_id].acc[im_data->acc_id].cred_cnt,
+		pjsua_var[inst_id].acc[im_data->acc_id].cred);
 
 	    pjsip_auth_clt_set_prefs(&auth, 
-				     &pjsua_var.acc[im_data->acc_id].cfg.auth_pref);
+				     &pjsua_var[inst_id].acc[im_data->acc_id].cfg.auth_pref);
 
 	    status = pjsip_auth_clt_reinit_req(&auth, rdata, tsx->last_tx,
 					       &tdata);
@@ -486,7 +557,7 @@ static void typing_callback(void *token, pjsip_event *e)
 		PJSIP_MSG_CSEQ_HDR(tdata->msg)->cseq++;
 
 		/* Re-send request */
-		status = pjsip_endpt_send_request( pjsua_var.endpt, tdata, -1,
+		status = pjsip_endpt_send_request( pjsua_var[inst_id].endpt, tdata, -1,
 						   im_data2, &typing_callback);
 		if (status == PJ_SUCCESS) {
 		    /* Done */
@@ -503,11 +574,15 @@ static void typing_callback(void *token, pjsip_event *e)
  * Send instant messaging outside dialog, using the specified account for
  * route set and authentication.
  */
-PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id, 
+PJ_DEF(pj_status_t) pjsua_im_send( pjsua_inst_id inst_id,
+				   pjsua_acc_id acc_id, 
 				   const pj_str_t *to,
 				   const pj_str_t *mime_type,
 				   const pj_str_t *content,
 				   const pjsua_msg_data *msg_data,
+				   char *s_rport,
+				   char *s_proc_name,
+				   char *s_timeout,
 				   void *user_data)
 {
     pjsip_tx_data *tdata;
@@ -517,15 +592,18 @@ PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id,
     pjsua_im_data *im_data;
     pjsua_acc *acc;
     pj_str_t contact;
-    pj_status_t status;
+	pj_status_t status;
+	pj_str_t rport = (s_rport == NULL ? pj_str("0") : pj_str(s_rport));
+	pj_str_t timeout = (s_timeout == NULL ? pj_str("30") : pj_str(s_timeout));
+	pj_str_t proc_name = (s_proc_name == NULL ? pj_str("") : pj_str(s_proc_name));
 
     /* To and message body must be specified. */
     PJ_ASSERT_RETURN(to && content, PJ_EINVAL);
 
-    acc = &pjsua_var.acc[acc_id];
+    acc = &pjsua_var[inst_id].acc[acc_id];
 
     /* Create request. */
-    status = pjsip_endpt_create_request(pjsua_var.endpt, 
+    status = pjsip_endpt_create_request(pjsua_var[inst_id].endpt, 
 					&pjsip_message_method, to, 
 					&acc->cfg.id,
 					to, NULL, NULL, -1, NULL, &tdata);
@@ -540,13 +618,25 @@ PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id,
     if (acc->cfg.transport_id != PJSUA_INVALID_ID) {
 	pjsip_tpselector tp_sel;
 
-	pjsua_init_tpselector(acc->cfg.transport_id, &tp_sel);
+	pjsua_init_tpselector(inst_id, acc->cfg.transport_id, &tp_sel);
 	pjsip_tx_data_set_transport(tdata, &tp_sel);
     }
 
     /* Add accept header. */
     pjsip_msg_add_hdr( tdata->msg, 
-		       (pjsip_hdr*)pjsua_im_create_accept(tdata->pool));
+		(pjsip_hdr*)pjsua_im_create_accept(tdata->pool));
+
+	/* Add rport header. */
+	pjsip_msg_add_hdr( tdata->msg, 
+		(pjsip_hdr*)pjsua_im_create_rport(tdata->pool, &rport));
+
+	/* Add rport header. */
+	pjsip_msg_add_hdr( tdata->msg, 
+		(pjsip_hdr*)pjsua_im_create_proc_name(tdata->pool, &proc_name));
+
+	/* Add timeout header. */
+	pjsip_msg_add_hdr( tdata->msg, 
+		(pjsip_hdr*)pjsua_im_create_timtout(tdata->pool, &timeout));
 
     /* Create suitable Contact header unless a Contact header has been
      * set in the account.
@@ -554,7 +644,7 @@ PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id,
     if (acc->contact.slen) {
 	contact = acc->contact;
     } else {
-	status = pjsua_acc_create_uac_contact(tdata->pool, &contact, acc_id, to);
+	status = pjsua_acc_create_uac_contact(inst_id, tdata->pool, &contact, acc_id, to);
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Unable to generate Contact header", status);
 	    pjsip_tx_data_dec_ref(tdata);
@@ -570,6 +660,7 @@ PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id,
      * application on the callback
      */
     im_data = PJ_POOL_ZALLOC_T(tdata->pool, pjsua_im_data);
+	im_data->inst_id = inst_id;
     im_data->acc_id = acc_id;
     im_data->call_id = PJSUA_INVALID_ID;
     pj_strdup_with_null(tdata->pool, &im_data->to, to);
@@ -596,13 +687,13 @@ PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id,
     }
 
     /* Add additional headers etc. */
-    pjsua_process_msg_data(tdata, msg_data);
+    pjsua_process_msg_data(inst_id, tdata, msg_data);
 
     /* Add route set */
     pjsua_set_msg_route_set(tdata, &acc->route_set);
 
     /* Send request (statefully) */
-    status = pjsip_endpt_send_request( pjsua_var.endpt, tdata, -1, 
+    status = pjsip_endpt_send_request( pjsua_var[inst_id].endpt, tdata, -1, 
 				       im_data, &im_callback);
     if (status != PJ_SUCCESS) {
 	pjsua_perror(THIS_FILE, "Unable to send request", status);
@@ -616,7 +707,8 @@ PJ_DEF(pj_status_t) pjsua_im_send( pjsua_acc_id acc_id,
 /*
  * Send typing indication outside dialog.
  */
-PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_acc_id acc_id, 
+PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_inst_id inst_id,
+					 pjsua_acc_id acc_id, 
 				     const pj_str_t *to, 
 				     pj_bool_t is_typing,
 				     const pjsua_msg_data *msg_data)
@@ -628,10 +720,10 @@ PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_acc_id acc_id,
     pj_str_t contact;
     pj_status_t status;
 
-    acc = &pjsua_var.acc[acc_id];
+    acc = &pjsua_var[inst_id].acc[acc_id];
 
     /* Create request. */
-    status = pjsip_endpt_create_request( pjsua_var.endpt, &pjsip_message_method,
+    status = pjsip_endpt_create_request( pjsua_var[inst_id].endpt, &pjsip_message_method,
 					 to, &acc->cfg.id,
 					 to, NULL, NULL, -1, NULL, &tdata);
     if (status != PJ_SUCCESS) {
@@ -646,7 +738,7 @@ PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_acc_id acc_id,
     if (acc->cfg.transport_id != PJSUA_INVALID_ID) {
 	pjsip_tpselector tp_sel;
 
-	pjsua_init_tpselector(acc->cfg.transport_id, &tp_sel);
+	pjsua_init_tpselector(inst_id, acc->cfg.transport_id, &tp_sel);
 	pjsip_tx_data_set_transport(tdata, &tp_sel);
     }
 
@@ -661,7 +753,7 @@ PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_acc_id acc_id,
     if (acc->contact.slen) {
 	contact = acc->contact;
     } else {
-	status = pjsua_acc_create_uac_contact(tdata->pool, &contact, acc_id, to);
+	status = pjsua_acc_create_uac_contact(inst_id, tdata->pool, &contact, acc_id, to);
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Unable to generate Contact header", status);
 	    pjsip_tx_data_dec_ref(tdata);
@@ -679,17 +771,18 @@ PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_acc_id acc_id,
 						      NULL, NULL, -1);
 
     /* Add additional headers etc. */
-    pjsua_process_msg_data(tdata, msg_data);
+    pjsua_process_msg_data(inst_id, tdata, msg_data);
 
     /* Add route set */
     pjsua_set_msg_route_set(tdata, &acc->route_set);
 
     /* Create data to reauthenticate */
-    im_data = PJ_POOL_ZALLOC_T(tdata->pool, pjsua_im_data);
+	im_data = PJ_POOL_ZALLOC_T(tdata->pool, pjsua_im_data);
+	im_data->inst_id = inst_id;
     im_data->acc_id = acc_id;
 
     /* Send request (statefully) */
-    status = pjsip_endpt_send_request( pjsua_var.endpt, tdata, -1, 
+    status = pjsip_endpt_send_request( pjsua_var[inst_id].endpt, tdata, -1, 
 				       im_data, &typing_callback);
     if (status != PJ_SUCCESS) {
 	pjsua_perror(THIS_FILE, "Unable to send request", status);
@@ -703,7 +796,7 @@ PJ_DEF(pj_status_t) pjsua_im_typing( pjsua_acc_id acc_id,
 /*
  * Init pjsua IM module.
  */
-pj_status_t pjsua_im_init(void)
+pj_status_t pjsua_im_init(pjsua_inst_id inst_id)
 {
     const pj_str_t msg_tag = { "MESSAGE", 7 };
     const pj_str_t STR_MIME_TEXT_PLAIN = { "text/plain", 10 };
@@ -711,21 +804,23 @@ pj_status_t pjsua_im_init(void)
 		    { "application/im-iscomposing+xml", 30 };
     pj_status_t status;
 
+	mod_pjsua_im_initialize();
+
     /* Register module */
-    status = pjsip_endpt_register_module(pjsua_var.endpt, &mod_pjsua_im);
+    status = pjsip_endpt_register_module(pjsua_var[inst_id].endpt, &mod_pjsua_im[inst_id]);
     if (status != PJ_SUCCESS)
 	return status;
 
     /* Register support for MESSAGE method. */
-    pjsip_endpt_add_capability( pjsua_var.endpt, &mod_pjsua_im, PJSIP_H_ALLOW,
+    pjsip_endpt_add_capability( pjsua_var[inst_id].endpt, &mod_pjsua_im[inst_id], PJSIP_H_ALLOW,
 				NULL, 1, &msg_tag);
 
     /* Register support for "application/im-iscomposing+xml" content */
-    pjsip_endpt_add_capability( pjsua_var.endpt, &mod_pjsua_im, PJSIP_H_ACCEPT,
+    pjsip_endpt_add_capability( pjsua_var[inst_id].endpt, &mod_pjsua_im[inst_id], PJSIP_H_ACCEPT,
 				NULL, 1, &STR_MIME_APP_ISCOMPOSING);
 
     /* Register support for "text/plain" content */
-    pjsip_endpt_add_capability( pjsua_var.endpt, &mod_pjsua_im, PJSIP_H_ACCEPT,
+    pjsip_endpt_add_capability( pjsua_var[inst_id].endpt, &mod_pjsua_im[inst_id], PJSIP_H_ACCEPT,
 				NULL, 1, &STR_MIME_TEXT_PLAIN);
 
     return PJ_SUCCESS;

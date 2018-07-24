@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: addr_resolv_sock.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -23,6 +23,7 @@
 #include <pj/errno.h>
 #include <pj/ip_helper.h>
 #include <pj/compat/socket.h>
+#include <pj/log.h>
 
 #if defined(PJ_GETADDRINFO_USE_CFHOST) && PJ_GETADDRINFO_USE_CFHOST!=0
 #   include <CoreFoundation/CFString.h>
@@ -76,6 +77,7 @@ PJ_DEF(pj_status_t) pj_getaddrinfo(int af, const pj_str_t *nodename,
     int rc;
     struct addrinfo hint, *res, *orig_res;
 #endif
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() PJ_SOCK_HAS_GETADDRINFO."));
 
     PJ_ASSERT_RETURN(nodename && count && *count && ai, PJ_EINVAL);
     PJ_ASSERT_RETURN(nodename->ptr && nodename->slen, PJ_EINVAL);
@@ -116,22 +118,29 @@ PJ_DEF(pj_status_t) pj_getaddrinfo(int af, const pj_str_t *nodename,
     nodecopy[nodename->slen] = '\0';
 
 #if defined(PJ_GETADDRINFO_USE_CFHOST) && PJ_GETADDRINFO_USE_CFHOST!=0
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFStringCreateWithCStringNoCopy1."));
     hostname =  CFStringCreateWithCStringNoCopy(kCFAllocatorDefault, nodecopy,
 						kCFStringEncodingASCII,
 						kCFAllocatorNull);
-    hostRef = CFHostCreateWithName(kCFAllocatorDefault, hostname);
-    if (CFHostStartInfoResolution(hostRef, kCFHostAddresses, nil)) {
-	CFArrayRef addrRef = CFHostGetAddressing(hostRef, nil);
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFStringCreateWithCStringNoCopy2."));
+	hostRef = CFHostCreateWithName(kCFAllocatorDefault, hostname);
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFHostCreateWithName."));
+	if (CFHostStartInfoResolution(hostRef, kCFHostAddresses, nil)) {
+		PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFHostStartInfoResolution."));
+		CFArrayRef addrRef = CFHostGetAddressing(hostRef, nil);
+		PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFHostGetAddressing."));
 	i = 0;
 	if (addrRef != nil) {
 	    CFIndex idx, naddr;
 	    
-	    naddr = CFArrayGetCount(addrRef);
+		naddr = CFArrayGetCount(addrRef);
+		PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFArrayGetCount."));
 	    for (idx = 0; idx < naddr && i < *count; idx++) {
 		struct sockaddr *addr;
 		
 		addr = (struct sockaddr *)
-		       CFDataGetBytePtr(CFArrayGetValueAtIndex(addrRef, idx));
+			CFDataGetBytePtr(CFArrayGetValueAtIndex(addrRef, idx));
+		PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFDataGetBytePtr."));
 		/* This should not happen. */
 		pj_assert(addr);
 		
@@ -158,7 +167,8 @@ PJ_DEF(pj_status_t) pj_getaddrinfo(int af, const pj_str_t *nodename,
     }
     
     CFRelease(hostRef);
-    CFRelease(hostname);
+	CFRelease(hostname);
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() CFRelease."));
     
     return status;
 #else
@@ -166,7 +176,9 @@ PJ_DEF(pj_status_t) pj_getaddrinfo(int af, const pj_str_t *nodename,
     pj_bzero(&hint, sizeof(hint));
     hint.ai_family = af;
 
-    rc = getaddrinfo(nodecopy, NULL, &hint, &res);
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() getaddrinfo1."));
+	rc = getaddrinfo(nodecopy, NULL, &hint, &res);
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() getaddrinfo2."));
     if (rc != 0)
 	return PJ_ERESOLVE;
 
@@ -247,9 +259,11 @@ PJ_DEF(pj_status_t) pj_getaddrinfo(int af, const pj_str_t *nodename,
 	pj_bzero(&he, sizeof(he));
 	#endif
 
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() pj_gethostbyname1."));
 	status = pj_gethostbyname(nodename, &he);
 	if (status != PJ_SUCCESS)
-	    return status;
+		return status;
+	PJ_LOG(4, ("sock_common.c", "pj_getaddrinfo() pj_gethostbyname2."));
 
 	max_count = *count;
 	*count = 0;
@@ -259,11 +273,11 @@ PJ_DEF(pj_status_t) pj_getaddrinfo(int af, const pj_str_t *nodename,
 	for (i=0; he.h_addr_list[i] && *count<max_count; ++i) {
 	    pj_ansi_strncpy(ai[*count].ai_canonname, he.h_name,
 			    sizeof(ai[*count].ai_canonname));
-	    ai[*count].ai_canonname[sizeof(ai[*count].ai_canonname)-1] = '\0';
+		ai[*count].ai_canonname[sizeof(ai[*count].ai_canonname)-1] = '\0';
 
-	    ai[*count].ai_addr.ipv4.sin_family = PJ_AF_INET;
-	    pj_memcpy(&ai[*count].ai_addr.ipv4.sin_addr,
-		      he.h_addr_list[i], he.h_length);
+		ai[*count].ai_addr.ipv4.sin_family = PJ_AF_INET;
+		pj_memcpy(&ai[*count].ai_addr.ipv4.sin_addr,
+			he.h_addr_list[i], he.h_length);
 	    PJ_SOCKADDR_RESET_LEN(&ai[*count].ai_addr);
 
 	    (*count)++;

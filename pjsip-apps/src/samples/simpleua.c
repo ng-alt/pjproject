@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: simpleua.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
     pj_status_t status;
 
     /* Must init PJLIB first: */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
 
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &cp, &pj_pool_factory_default_policy, 0);
 
 
     /* Create global endpoint: */
@@ -268,11 +268,13 @@ int main(int argc, char *argv[])
      * This will implicitly initialize PJMEDIA too.
      */
 #if PJ_HAS_THREADS
-    status = pjmedia_endpt_create(&cp.factory, NULL, 1, &g_med_endpt);
+    //status = pjmedia_endpt_create(&cp.factory, NULL, 1, &g_med_endpt);
+    status = pjmedia_endpt_create(0, &cp.factory, NULL, 1, 0,&g_med_endpt);
 #else
     status = pjmedia_endpt_create(&cp.factory, 
 				  pjsip_endpt_get_ioqueue(g_endpt), 
-				  0, &g_med_endpt);
+				  //0, &g_med_endpt);
+				  0, 0, &g_med_endpt);
 #endif
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
@@ -330,7 +332,7 @@ int main(int argc, char *argv[])
 	local_uri = pj_str(temp);
 
 	/* Create UAC dialog */
-	status = pjsip_dlg_create_uac( pjsip_ua_instance(), 
+	status = pjsip_dlg_create_uac( 0, pjsip_ua_instance(0),
 				       &local_uri,  /* local URI */
 				       &local_uri,  /* local Contact */
 				       &dst_uri,    /* remote URI */
@@ -419,7 +421,7 @@ int main(int argc, char *argv[])
 	 * From now on, the invite session's state will be reported to us
 	 * via the invite session callbacks.
 	 */
-	status = pjsip_inv_send_msg(g_inv, tdata);
+	status = pjsip_inv_send_msg(0, g_inv, tdata);
 	PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
 
@@ -560,9 +562,10 @@ static pj_bool_t on_rx_request( pjsip_rx_data *rdata )
     /*
      * Create UAS dialog.
      */
-    status = pjsip_dlg_create_uas( pjsip_ua_instance(), 
+    status = pjsip_dlg_create_uas( 0, pjsip_ua_instance(0),
 				   rdata,
 				   &local_uri, /* contact */
+				   NULL,
 				   &dlg);
     if (status != PJ_SUCCESS) {
 	pjsip_endpt_respond_stateless(g_endpt, rdata, 500, NULL,
@@ -602,14 +605,14 @@ static pj_bool_t on_rx_request( pjsip_rx_data *rdata )
 
 
     /* Send the 180 response. */  
-    status = pjsip_inv_send_msg(g_inv, tdata); 
+    status = pjsip_inv_send_msg(0, g_inv, tdata);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, PJ_TRUE);
 
 
     /*
      * Now create 200 response.
      */
-    status = pjsip_inv_answer( g_inv, 
+    status = pjsip_inv_answer( 0, g_inv,
 			       200, NULL,	/* st_code and st_text */
 			       NULL,		/* SDP already specified */
 			       &tdata);
@@ -618,7 +621,7 @@ static pj_bool_t on_rx_request( pjsip_rx_data *rdata )
     /*
      * Send the 200 response.
      */
-    status = pjsip_inv_send_msg(g_inv, tdata);
+    status = pjsip_inv_send_msg(0, g_inv, tdata);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, PJ_TRUE);
 
 

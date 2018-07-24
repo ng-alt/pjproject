@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: multipart_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -235,7 +235,7 @@ static int parse_test(void)
 			p_tests[i].boundary);
 
 	pj_strdup2_with_null(pool, &str, p_tests[i].msg);
-	body = pjsip_multipart_parse(pool, str.ptr, str.slen, &ctype, 0);
+	body = pjsip_multipart_parse(0, pool, str.ptr, str.slen, &ctype, 0);
 	if (!body)
 	    return -100;
 

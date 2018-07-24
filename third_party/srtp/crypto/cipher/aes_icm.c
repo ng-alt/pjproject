@@ -283,11 +283,14 @@ aes_icm_set_iv(aes_icm_ctx_t *c, void *iv) {
  * this is an internal, hopefully inlined function
  */
   
-inline void
+//inline void
+void
 aes_icm_advance_ismacryp(aes_icm_ctx_t *c, uint8_t forIsmacryp) {
   /* fill buffer with new keystream */
+	
   v128_copy(&c->keystream_buffer, &c->counter);
   aes_encrypt(&c->keystream_buffer, c->expanded_key);
+	
   c->bytes_in_buffer = sizeof(v128_t);
 
   debug_print(mod_aes_icm, "counter:    %s", 

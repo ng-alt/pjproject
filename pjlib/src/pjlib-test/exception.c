@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: exception.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -51,67 +51,67 @@
 #define	ID_1	1
 #define ID_2	2
 
-static int throw_id_1(void)
+static int throw_id_1(int inst_id)
 {
-    PJ_THROW( ID_1 );
+    PJ_THROW( inst_id, ID_1 );
     PJ_UNREACHED(return -1;)
 }
 
-static int throw_id_2(void)
+static int throw_id_2(int inst_id)
 {
-    PJ_THROW( ID_2 );
+    PJ_THROW( inst_id, ID_2 );
     PJ_UNREACHED(return -1;)
 }
 
-static int try_catch_test(void)
+static int try_catch_test(int inst_id)
 {
     PJ_USE_EXCEPTION;
     int rc = -200;
 
-    PJ_TRY {
-	PJ_THROW(ID_1);
+    PJ_TRY(inst_id) {
+	PJ_THROW(inst_id, ID_1);
     }
     PJ_CATCH_ANY {
 	rc = 0;
     }
-    PJ_END;
+    PJ_END(inst_id);
     return rc;
 }
 
-static int throw_in_handler(void)
+static int throw_in_handler(int inst_id)
 {
     PJ_USE_EXCEPTION;
     int rc = 0;
 
-    PJ_TRY {
-	PJ_THROW(ID_1);
+    PJ_TRY(inst_id) {
+	PJ_THROW(inst_id, ID_1);
     }
     PJ_CATCH_ANY {
 	if (PJ_GET_EXCEPTION() != ID_1)
 	    rc = -300;
 	else
-	    PJ_THROW(ID_2);
+	    PJ_THROW(inst_id, ID_2);
     }
-    PJ_END;
+    PJ_END(inst_id);
     return rc;
 }
 
-static int return_in_handler(void)
+static int return_in_handler(int inst_id)
 {
     PJ_USE_EXCEPTION;
 
-    PJ_TRY {
-	PJ_THROW(ID_1);
+    PJ_TRY(inst_id) {
+	PJ_THROW(inst_id, ID_1);
     }
     PJ_CATCH_ANY {
 	return 0;
     }
-    PJ_END;
+    PJ_END(inst_id);
     return -400;
 }
 
 
-static int test(void)
+static int test(int inst_id)
 {
     int rc = 0;
     PJ_USE_EXCEPTION;
@@ -119,13 +119,13 @@ static int test(void)
     /*
      * No exception situation.
      */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
         rc = rc;
     }
     PJ_CATCH_ANY {
         rc = -3;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     if (rc != 0)
 	return rc;
@@ -134,8 +134,8 @@ static int test(void)
     /*
      * Basic TRY/CATCH
      */ 
-    PJ_TRY {
-	rc = throw_id_1();
+    PJ_TRY(inst_id) {
+	rc = throw_id_1(inst_id);
 
 	// should not reach here.
 	rc = -10;
@@ -144,11 +144,11 @@ static int test(void)
         int id = PJ_GET_EXCEPTION();
 	if (id != ID_1) {
 	    PJ_LOG(3,("", "...error: got unexpected exception %d (%s)", 
-		      id, pj_exception_id_name(id)));
+		      id, pj_exception_id_name(inst_id, id)));
 	    if (!rc) rc = -20;
 	}
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     if (rc != 0)
 	return rc;
@@ -156,8 +156,8 @@ static int test(void)
     /*
      * Multiple exceptions handlers
      */
-    PJ_TRY {
-	rc = throw_id_2();
+    PJ_TRY(inst_id) {
+	rc = throw_id_2(inst_id);
 	// should not reach here.
 	rc = -25;
     }
@@ -172,7 +172,7 @@ static int test(void)
 	    break;
 	}
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     if (rc != 0)
 	return rc;
@@ -180,8 +180,8 @@ static int test(void)
     /*
      * Test default handler.
      */
-    PJ_TRY {
-	rc = throw_id_1();
+    PJ_TRY(inst_id) {
+	rc = throw_id_1(inst_id);
 	// should not reach here
 	rc = -50;
     }
@@ -195,7 +195,7 @@ static int test(void)
 	    break;
 	}
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     if (rc != 0)
 	return rc;
@@ -203,13 +203,13 @@ static int test(void)
     /*
      * Nested handlers
      */
-    PJ_TRY {
-	rc = try_catch_test();
+    PJ_TRY(inst_id) {
+	rc = try_catch_test(inst_id);
     }
     PJ_CATCH_ANY {
 	rc = -70;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     if (rc != 0)
 	return rc;
@@ -218,9 +218,9 @@ static int test(void)
      * Throwing exception inside handler
      */
     rc = -80;
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	int rc2;
-	rc2 = throw_in_handler();
+	rc2 = throw_in_handler(inst_id);
 	if (rc2)
 	    rc = rc2;
     }
@@ -231,7 +231,7 @@ static int test(void)
 	    rc = -90;
 	}
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     if (rc != 0)
 	return rc;
@@ -243,28 +243,28 @@ static int test(void)
      * PJ_TRY block IS NOT OKAY!!). We want to test to see if handler
      * is cleaned up properly, but not sure how to do this.
      */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	int rc2;
-	rc2 = return_in_handler();
+	rc2 = return_in_handler(inst_id);
 	if (rc2)
 	    rc = rc2;
     }
     PJ_CATCH_ANY {
 	rc = -100;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
 
     return 0;
 }
 
-int exception_test(void)
+int exception_test(int inst_id)
 {
     int i, rc;
     enum { LOOP = 10 };
 
     for (i=0; i<LOOP; ++i) {
-	if ((rc=test()) != 0) {
+	if ((rc=test(inst_id)) != 0) {
 	    PJ_LOG(3,("", "...failed at i=%d (rc=%d)", i, rc));
 	    return rc;
 	}

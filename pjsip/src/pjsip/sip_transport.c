@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_transport.c 4092 2012-04-26 09:24:50Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -38,7 +38,7 @@
 
 #define THIS_FILE    "sip_transport.c"
 
-#if 0
+#if 1 //DEAN for debugging.
 #   define TRACE_(x)	PJ_LOG(5,x)
 
 static const char *addr_string(const pj_sockaddr_t *addr)
@@ -59,7 +59,7 @@ static pj_status_t mod_on_tx_msg(pjsip_tx_data *tdata);
 /* This module has sole purpose to print transmit data to contigous buffer
  * before actually transmitted to the wire. 
  */
-static pjsip_module mod_msg_print = 
+static pjsip_module mod_msg_print_initializer = 
 {
     NULL, NULL,				/* prev and next		    */
     { "mod-msg-print", 13},		/* Name.			    */
@@ -75,6 +75,23 @@ static pjsip_module mod_msg_print =
     &mod_on_tx_msg,			/* on_tx_response()		    */
     NULL,				/* on_tsx_state()		    */
 };
+
+static pjsip_module mod_msg_print[PJSUA_MAX_INSTANCES];
+static int is_initialized;
+
+static void mod_msg_print_initialize()
+{
+	int i;
+	if(is_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(mod_msg_print); i++)
+	{
+		mod_msg_print[i] = mod_msg_print_initializer;
+	}
+
+	is_initialized = 1;
+}
 
 /*
  * Transport manager.
@@ -395,6 +412,7 @@ PJ_DEF(pj_status_t) pjsip_tx_data_create( pjsip_tpmgr *mgr,
     tdata = PJ_POOL_ZALLOC_T(pool, pjsip_tx_data);
     tdata->pool = pool;
     tdata->mgr = mgr;
+	tdata->inst_id = pjsip_endpt_get_inst_id(mgr->endpt);
     pj_memcpy(tdata->obj_name, pool->obj_name, PJ_MAX_OBJ_NAME);
 
     status = pj_atomic_create(tdata->pool, 0, &tdata->ref_cnt);
@@ -468,20 +486,20 @@ PJ_DEF(void) pjsip_tx_data_invalidate_msg( pjsip_tx_data *tdata )
 PJ_DEF(pj_status_t) pjsip_tx_data_encode(pjsip_tx_data *tdata)
 {
     /* Allocate buffer if necessary. */
-    if (tdata->buf.start == NULL) {
-	PJ_USE_EXCEPTION;
+	if (tdata->buf.start == NULL) {
+		PJ_USE_EXCEPTION;
 
-	PJ_TRY {
-	    tdata->buf.start = (char*) 
-			       pj_pool_alloc(tdata->pool, PJSIP_MAX_PKT_LEN);
-	}
-	PJ_CATCH_ANY {
-	    return PJ_ENOMEM;
-	}
-	PJ_END
+		PJ_TRY(tdata->inst_id) {
+			tdata->buf.start = (char*) 
+					   pj_pool_alloc(tdata->pool, PJSIP_MAX_PKT_LEN);
+		}
+		PJ_CATCH_ANY {
+			return PJ_ENOMEM;
+		}
+		PJ_END(tdata->inst_id)
 
-	tdata->buf.cur = tdata->buf.start;
-	tdata->buf.end = tdata->buf.start + PJSIP_MAX_PKT_LEN;
+		tdata->buf.cur = tdata->buf.start;
+		tdata->buf.end = tdata->buf.start + PJSIP_MAX_PKT_LEN;
     }
 
     /* Do we need to reprint? */
@@ -659,6 +677,11 @@ PJ_DEF(pj_status_t) pjsip_transport_send(  pjsip_transport *tr,
 	return PJSIP_EPENDINGTX;
     }
 
+    /* Add reference to prevent deletion, and to cancel idle timer if
+     * it's running.
+     */
+    pjsip_transport_add_ref(tr);
+
     /* Fill in tp_info. */
     tdata->tp_info.transport = tr;
     pj_memcpy(&tdata->tp_info.dst_addr, addr, addr_len);
@@ -676,8 +699,10 @@ PJ_DEF(pj_status_t) pjsip_transport_send(  pjsip_transport *tr,
      */
     if (tr->tpmgr->on_tx_msg) {
 	status = (*tr->tpmgr->on_tx_msg)(tr->endpt, tdata);
-	if (status != PJ_SUCCESS)
+	if (status != PJ_SUCCESS) {
+	    pjsip_transport_dec_ref(tr);
 	    return status;
+    }
     }
 
     /* Save callback data. */
@@ -699,6 +724,7 @@ PJ_DEF(pj_status_t) pjsip_transport_send(  pjsip_transport *tr,
 	pjsip_tx_data_dec_ref(tdata);
     }
 
+    pjsip_transport_dec_ref(tr);
     return status;
 }
 
@@ -857,7 +883,9 @@ PJ_DEF(pj_status_t) pjsip_transport_dec_ref( pjsip_transport *tp )
 	    if (tp->is_shutdown) {
 		delay.sec = delay.msec = 0;
 	    } else {
-		delay.sec = PJSIP_TRANSPORT_IDLE_TIME;
+		delay.sec = (tp->dir==PJSIP_TP_DIR_OUTGOING) ?
+				PJSIP_TRANSPORT_IDLE_TIME :
+				PJSIP_TRANSPORT_SERVER_IDLE_TIME;
 		delay.msec = 0;
 	    }
 
@@ -882,6 +910,7 @@ PJ_DEF(pj_status_t) pjsip_transport_register( pjsip_tpmgr *mgr,
     int key_len;
     pj_uint32_t hval;
     void *entry;
+	pjsip_transport_key2 key;
 
     /* Init. */
     tp->tpmgr = mgr;
@@ -892,25 +921,32 @@ PJ_DEF(pj_status_t) pjsip_transport_register( pjsip_tpmgr *mgr,
     /* 
      * Register to hash table (see Trac ticket #42).
      */
-    key_len = sizeof(tp->key.type) + tp->addr_len;
+	// DEAN 2013-05-07 prepare remote ip:port for hash-table key calculating.
+	pj_bzero(&key, sizeof(pjsip_transport_key2));
+	key.type = tp->key.type;
+	pj_sockaddr_print(&tp->key.rem_addr, key.rem_addr_str, sizeof(key.rem_addr_str), 3);
+	key_len = sizeof(key.type) + strlen(key.rem_addr_str);
     pj_lock_acquire(mgr->lock);
 
     /* If entry already occupied, unregister previous entry */
     hval = 0;
-    entry = pj_hash_get(mgr->table, &tp->key, key_len, &hval);
+    entry = pj_hash_get(mgr->table, &key, key_len, &hval);
     if (entry != NULL)
-	pj_hash_set(NULL, mgr->table, &tp->key, key_len, hval, NULL);
+	pj_hash_set(NULL, mgr->table, &key, key_len, hval, NULL);
 
     /* Register new entry */
-    pj_hash_set(tp->pool, mgr->table, &tp->key, key_len, hval, tp);
+	pj_hash_set(tp->pool, mgr->table, &key, key_len, hval, tp);
+	pjsip_tpmgr_dump_transports(mgr);
 
     pj_lock_release(mgr->lock);
 
-    TRACE_((THIS_FILE,"Transport %s registered: type=%s, remote=%s:%d",
+    TRACE_((THIS_FILE,"Transport %s registered: type=%s, remote=%s, hval=%d",
 		       tp->obj_name,
-		       pjsip_transport_get_type_name(tp->key.type),
-		       addr_string(&tp->key.rem_addr),
-		       pj_sockaddr_get_port(&tp->key.rem_addr)));
+		       pjsip_transport_get_type_name(key.type),
+		       //addr_string(&tp->key.rem_addr),
+		       //pj_sockaddr_get_port(&tp->key.rem_addr),
+			   key.rem_addr_str,
+			   hval));
 
     return PJ_SUCCESS;
 }
@@ -919,6 +955,7 @@ PJ_DEF(pj_status_t) pjsip_transport_register( pjsip_tpmgr *mgr,
 static pj_status_t destroy_transport( pjsip_tpmgr *mgr,
 				      pjsip_transport *tp )
 {
+	pjsip_transport_key2 key2;
     int key_len;
     pj_uint32_t hval;
     void *entry;
@@ -942,11 +979,16 @@ static pj_status_t destroy_transport( pjsip_tpmgr *mgr,
     /*
      * Unregister from hash table (see Trac ticket #42).
      */
-    key_len = sizeof(tp->key.type) + tp->addr_len;
+	pj_bzero(&key2, sizeof(pjsip_transport_key2));
+	key2.type = tp->key.type;
+	pj_sockaddr_print(&tp->key.rem_addr, key2.rem_addr_str, sizeof(key2.rem_addr_str), 3);
+	key_len = sizeof(key2.type) + strlen(key2.rem_addr_str);	
+
+    //key_len = sizeof(tp->key.type) + tp->addr_len;
     hval = 0;
-    entry = pj_hash_get(mgr->table, &tp->key, key_len, &hval);
+    entry = pj_hash_get(mgr->table, &key2, key_len, &hval);
     if (entry == (void*)tp)
-	pj_hash_set(NULL, mgr->table, &tp->key, key_len, hval, NULL);
+	pj_hash_set(NULL, mgr->table, &key2, key_len, hval, NULL);
 
     pj_lock_release(mgr->lock);
 
@@ -1090,9 +1132,11 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_create( pj_pool_t *pool,
     pj_status_t status;
 
     PJ_ASSERT_RETURN(pool && endpt && rx_cb && p_mgr, PJ_EINVAL);
+	
+	mod_msg_print_initialize(); // DEAN added
 
     /* Register mod_msg_print module. */
-    status = pjsip_endpt_register_module(endpt, &mod_msg_print);
+    status = pjsip_endpt_register_module(endpt, &mod_msg_print[pool->factory->inst_id]);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -1255,6 +1299,8 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_destroy( pjsip_tpmgr *mgr )
     pj_hash_iterator_t *itr;
     pjsip_tpfactory *factory;
     pjsip_endpoint *endpt = mgr->endpt;
+
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
     
     PJ_LOG(5, (THIS_FILE, "Destroying transport manager"));
 
@@ -1293,8 +1339,8 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_destroy( pjsip_tpmgr *mgr )
     pj_lock_destroy(mgr->lock);
 
     /* Unregister mod_msg_print. */
-    if (mod_msg_print.id != -1) {
-	pjsip_endpt_unregister_module(endpt, &mod_msg_print);
+    if (mod_msg_print[inst_id].id != -1) {
+	pjsip_endpt_unregister_module(endpt, &mod_msg_print[inst_id]);
     }
 
 #if defined(PJ_DEBUG) && PJ_DEBUG!=0
@@ -1326,6 +1372,8 @@ PJ_DEF(pj_ssize_t) pjsip_tpmgr_receive_packet( pjsip_tpmgr *mgr,
     char *current_pkt;
     pj_size_t remaining_len;
     pj_size_t total_processed = 0;
+
+	int inst_id = rdata->tp_info.pool->factory->inst_id;
 
     /* Check size. */
     pj_assert(rdata->pkt_info.len > 0);
@@ -1379,7 +1427,7 @@ PJ_DEF(pj_ssize_t) pjsip_tpmgr_receive_packet( pjsip_tpmgr *mgr,
 	/* For TCP transport, check if the whole message has been received. */
 	if ((tr->flag & PJSIP_TRANSPORT_DATAGRAM) == 0) {
 	    pj_status_t msg_status;
-	    msg_status = pjsip_find_msg(current_pkt, remaining_len, PJ_FALSE, 
+	    msg_status = pjsip_find_msg(inst_id, current_pkt, remaining_len, PJ_FALSE, 
                                         &msg_fragment_size);
 	    if (msg_status != PJ_SUCCESS) {
 		if (remaining_len == PJSIP_MAX_PKT_LEN) {
@@ -1402,7 +1450,7 @@ PJ_DEF(pj_ssize_t) pjsip_tpmgr_receive_packet( pjsip_tpmgr *mgr,
 
 	/* Parse the message. */
 	rdata->msg_info.msg = msg = 
-	    pjsip_parse_rdata( current_pkt, msg_fragment_size, rdata);
+	    pjsip_parse_rdata( inst_id, current_pkt, msg_fragment_size, rdata);
 
 	/* Restore null termination */
 	current_pkt[msg_fragment_size] = saved;
@@ -1421,7 +1469,7 @@ PJ_DEF(pj_ssize_t) pjsip_tpmgr_receive_packet( pjsip_tpmgr *mgr,
 		len = pj_ansi_snprintf(tmp.ptr+tmp.slen, sizeof(buf)-tmp.slen,
 				       ": %s exception when parsing '%.*s' "
 				       "header on line %d col %d",
-				       pj_exception_id_name(err->except_code),
+				       pj_exception_id_name(inst_id, err->except_code),
 				       (int)err->hname.slen, err->hname.ptr,
 				       err->line, err->col);
 		if (len > 0 && len < (int) (sizeof(buf)-tmp.slen)) {
@@ -1539,6 +1587,29 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_acquire_transport(pjsip_tpmgr *mgr,
 					  NULL, tp);
 }
 
+static void dump_bin(const char *buf, unsigned len)
+{
+	unsigned i;
+
+	PJ_LOG(3,(THIS_FILE, "begin dump"));
+	for (i=0; i<len; ++i) {
+		int j;
+		char bits[9];
+		unsigned val = buf[i] & 0xFF;
+
+		bits[8] = '\0';
+		for (j=0; j<8; ++j) {
+			if (val & (1 << (7-j)))
+				bits[j] = '1';
+			else
+				bits[j] = '0';
+		}
+
+		PJ_LOG(3,(THIS_FILE, "%2d %s [%d]", i, bits, val));
+	}
+	PJ_LOG(3,(THIS_FILE, "end dump"));
+}
+
 /*
  * pjsip_tpmgr_acquire_transport2()
  *
@@ -1556,10 +1627,11 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_acquire_transport2(pjsip_tpmgr *mgr,
     pjsip_tpfactory *factory;
     pj_status_t status;
 
-    TRACE_((THIS_FILE,"Acquiring transport type=%s, remote=%s:%d",
+    TRACE_((THIS_FILE,"Acquiring transport type=%s, remote=%s:%d, sel=%d",
 		       pjsip_transport_get_type_name(type),
 		       addr_string(remote),
-		       pj_sockaddr_get_port(remote)));
+		       pj_sockaddr_get_port(remote),
+			   (sel == NULL ? -1 : sel->type)));
 
     pj_lock_acquire(mgr->lock);
 
@@ -1619,18 +1691,29 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_acquire_transport2(pjsip_tpmgr *mgr,
 	 * In this case, lookup the transport from the hash table.
 	 */
 	pjsip_transport_key key;
+	pjsip_transport_key2 key2;
 	int key_len;
 	pjsip_transport *transport;
+	pj_uint32_t hval = 0;
 
 	pj_bzero(&key, sizeof(key));
-	key_len = sizeof(key.type) + addr_len;
-
+	//key_len = sizeof(key.type) + addr_len;
 	/* First try to get exact destination. */
 	key.type = type;
 	pj_memcpy(&key.rem_addr, remote, addr_len);
 
+	// DEAN 2013-05-07 prepare remote ip:port for hash-table key calculating.
+	pj_bzero(&key2, sizeof(key2));
+	/* First try to get exact destination. */
+	key2.type = type;
+	pj_bzero(key2.rem_addr_str, sizeof(key2.rem_addr_str));
+	pj_sockaddr_print(remote, key2.rem_addr_str, sizeof(key2.rem_addr_str), 3);
+	key_len = sizeof(key2.type) + strlen(key2.rem_addr_str);
+	pjsip_tpmgr_dump_transports(mgr);
+	
+	//dump_bin((char *)&key2, key_len);
 	transport = (pjsip_transport*)
-		    pj_hash_get(mgr->table, &key, key_len, NULL);
+		    pj_hash_get(mgr->table, &key2, key_len, &hval);
 
 	if (transport == NULL) {
 	    unsigned flag = pjsip_transport_get_flag_from_type(type);
@@ -1644,9 +1727,9 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_acquire_transport2(pjsip_tpmgr *mgr,
 		pj_sockaddr *addr = &key.rem_addr;
 
 		pj_bzero(addr, addr_len);
-		key_len = sizeof(key.type) + addr_len;
+		key_len = sizeof(key2.type) + addr_len;
 		transport = (pjsip_transport*) 
-			    pj_hash_get(mgr->table, &key, key_len, NULL);
+			    pj_hash_get(mgr->table, &key2, key_len, NULL);
 	    }
 	    /* For datagram transports, try lookup with zero address.
 	     */
@@ -1657,11 +1740,14 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_acquire_transport2(pjsip_tpmgr *mgr,
 		pj_bzero(addr, addr_len);
 		addr->addr.sa_family = remote_addr->addr.sa_family;
 
-		key_len = sizeof(key.type) + addr_len;
+		key_len = sizeof(key2.type) + addr_len;
 		transport = (pjsip_transport*)
-			    pj_hash_get(mgr->table, &key, key_len, NULL);
+			    pj_hash_get(mgr->table, &key2, key_len, NULL);
 	    }
 	}
+
+	if (transport!=NULL)
+		TRACE_((THIS_FILE, "Transport %s got with hval=%d", transport->obj_name, hval));
 
 	if (transport!=NULL && !transport->is_shutdown) {
 	    /*
@@ -1752,11 +1838,13 @@ PJ_DEF(void) pjsip_tpmgr_dump_transports(pjsip_tpmgr *mgr)
 	    pjsip_transport *t = (pjsip_transport*) 
 	    			 pj_hash_this(mgr->table, itr);
 
-	    PJ_LOG(3, (THIS_FILE, "  %s %s (refcnt=%d%s)", 
+	    PJ_LOG(3, (THIS_FILE, "  %s %s (refcnt=%d%s %s %s)", 
 		       t->obj_name,
 		       t->info,
 		       pj_atomic_get(t->ref_cnt),
-		       (t->idle_timer.id ? " [idle]" : "")));
+			   (t->idle_timer.id ? " [idle]" : ""),
+			   (t->is_shutdown ? " [shutdown]" : ""),
+			   (t->is_destroying ? " [destroying]" : "")));
 
 	    itr = pj_hash_next(mgr->table, itr);
 	} while (itr);
@@ -1907,8 +1995,9 @@ PJ_DEF(pj_status_t) pjsip_transport_remove_state_listener (
 
     /* Transport data is NULL or no registered listener? */
     if (!tp_data || pj_list_empty(&tp_data->st_listeners)) {
-	pj_lock_release(tp->lock);
-	return PJ_ENOTFOUND;
+		pj_lock_release(tp->lock);
+		PJ_LOG(4, ("sip_transport.c", "pjsip_transport_remove_state_listener() tp_data not found."));
+		return PJ_ENOTFOUND;
     }
 
     entry = (tp_state_listener*)key;

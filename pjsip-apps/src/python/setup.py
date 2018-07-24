@@ -1,4 +1,4 @@
-# $Id$
+# $Id: setup.py 4387 2013-02-27 10:16:08Z ming $
 #
 # pjsua Setup script.
 #
@@ -21,18 +21,44 @@
 from distutils.core import setup, Extension
 import os
 import sys
+import platform
 
 # find pjsip version
 pj_version=""
-f = open('../../../pjlib/src/pj/config.c', 'r')
+pj_version_major=""
+pj_version_minor=""
+pj_version_rev=""
+pj_version_suffix=""
+f = open('../../../version.mak', 'r')
 for line in f:
-    if line.find("PJ_VERSION") != -1:
-	pj_version= line.split(" = ")[1].strip('";\r\n')
-	break
+    if line.find("export PJ_VERSION_MAJOR") != -1:
+    	tokens=line.split("=")
+	if len(tokens)>1:
+		pj_version_major= tokens[1].strip()
+    elif line.find("export PJ_VERSION_MINOR") != -1:
+    	tokens=line.split("=")
+	if len(tokens)>1:
+		pj_version_minor= line.split("=")[1].strip()
+    elif line.find("export PJ_VERSION_REV") != -1:
+    	tokens=line.split("=")
+	if len(tokens)>1:
+		pj_version_rev= line.split("=")[1].strip()
+    elif line.find("export PJ_VERSION_SUFFIX") != -1:
+    	tokens=line.split("=")
+	if len(tokens)>1:
+		pj_version_suffix= line.split("=")[1].strip()
+
 f.close()
-if pj_version=="":
-    print 'Unable to get PJ_VERSION'
+if not pj_version_major:
+    print 'Unable to get PJ_VERSION_MAJOR'
     sys.exit(1)
+
+pj_version = pj_version_major + "." + pj_version_minor
+if pj_version_rev:
+	pj_version += "." + pj_version_rev
+if pj_version_suffix:
+	pj_version += "-" + pj_version_suffix
+
 #print 'PJ_VERSION = "'+ pj_version + '"'
 
 
@@ -58,9 +84,13 @@ for line in f:
 f.close()
 
 # Mac OS X depedencies
-if sys.platform == 'darwin':
+if platform.system() == 'Darwin':
     extra_link_args = ["-framework", "CoreFoundation", 
                        "-framework", "AudioToolbox"]
+    version = platform.mac_ver()[0].split(".")    
+    # OS X Lion (10.7.x) or above support
+    if version[0] == '10' and int(version[1]) >= 7:
+        extra_link_args += ["-framework", "AudioUnit"]
 else:
     extra_link_args = []
 
@@ -80,5 +110,4 @@ setup(name="pjsua",
                     ],
       py_modules=["pjsua"]
      )
-
 

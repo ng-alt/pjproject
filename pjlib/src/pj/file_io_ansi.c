@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: file_io_ansi.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -22,17 +22,32 @@
 #include <pj/errno.h>
 #include <stdio.h>
 #include <errno.h>
+#include <syslog.h>
+
+pj_bool_t write_to_syslog = PJ_FALSE;
+int  syslog_facility = 0;
+
+PJ_DEF(pj_status_t) pj_syslog_facility(int facility)
+{
+	write_to_syslog = PJ_TRUE;
+	syslog_facility = facility;
+	return PJ_SUCCESS;
+}
 
 PJ_DEF(pj_status_t) pj_file_open( pj_pool_t *pool,
                                   const char *pathname, 
                                   unsigned flags,
-                                  pj_oshandle_t *fd)
+								  pj_oshandle_t *fd,
+								  unsigned *size)
 {
     char mode[8];
     char *p = mode;
 
     PJ_ASSERT_RETURN(pathname && fd, PJ_EINVAL);
     PJ_UNUSED_ARG(pool);
+
+	if (write_to_syslog)
+		return PJ_SUCCESS;
 
     if ((flags & PJ_O_APPEND) == PJ_O_APPEND) {
         if ((flags & PJ_O_WRONLY) == PJ_O_WRONLY) {
@@ -45,7 +60,7 @@ PJ_DEF(pj_status_t) pj_file_open( pj_pool_t *pool,
              */
         }
     } else {
-        if ((flags & PJ_O_RDONLY) == PJ_O_RDONLY) {
+        if (flags != PJ_O_RDWR && (flags & PJ_O_RDONLY) == PJ_O_RDONLY) {
             *p++ = 'r';
             if ((flags & PJ_O_WRONLY) == PJ_O_WRONLY)
                 *p++ = '+';
@@ -63,16 +78,22 @@ PJ_DEF(pj_status_t) pj_file_open( pj_pool_t *pool,
     *fd = fopen(pathname, mode);
     if (*fd == NULL)
         return PJ_RETURN_OS_ERROR(errno);
-    
+
+	if ((flags & PJ_O_APPEND) == PJ_O_APPEND) {
+		if (size)
+			pj_file_getpos(*fd, size);
+	}
+
     return PJ_SUCCESS;
 }
 
 PJ_DEF(pj_status_t) pj_file_close(pj_oshandle_t fd)
 {
-    PJ_ASSERT_RETURN(fd, PJ_EINVAL);
-    if (fclose((FILE*)fd) != 0)
-        return PJ_RETURN_OS_ERROR(errno);
-
+	PJ_ASSERT_RETURN(fd, PJ_EINVAL);
+	if (!write_to_syslog) {
+		if (fclose((FILE*)fd) != 0)
+			return PJ_RETURN_OS_ERROR(errno);
+	}
     return PJ_SUCCESS;
 }
 
@@ -81,13 +102,18 @@ PJ_DEF(pj_status_t) pj_file_write( pj_oshandle_t fd,
                                    pj_ssize_t *size)
 {
     size_t written;
-
-    clearerr((FILE*)fd);
-    written = fwrite(data, 1, *size, (FILE*)fd);
-    if (ferror((FILE*)fd)) {
-        *size = -1;
-        return PJ_RETURN_OS_ERROR(errno);
-    }
+	if (write_to_syslog) {
+		openlog("asusnatnl", LOG_CONS, syslog_facility == 0 ? LOG_USER: syslog_facility);
+		syslog(LOG_DEBUG, data);
+		closelog();
+	} else {
+		clearerr((FILE*)fd);
+		written = fwrite(data, 1, *size, (FILE*)fd);
+		if (ferror((FILE*)fd)) {
+			*size = -1;
+			return PJ_RETURN_OS_ERROR(errno);
+		}
+	}
 
     *size = written;
     return PJ_SUCCESS;

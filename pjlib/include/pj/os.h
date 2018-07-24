@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -123,6 +123,16 @@ typedef struct pj_sys_info
  */
 PJ_DECL(const pj_sys_info*) pj_get_sys_info(void);
 
+
+/**
+ * DEAN Added
+ *
+ * Obtain the system information.
+ *
+ * @return	System information structure.
+ */
+PJ_DECL(const pj_sys_info*) natnl_get_sys_info(void);
+
 /*
  * @}
  */
@@ -177,6 +187,12 @@ typedef long pj_thread_desc[PJ_THREAD_DESC_SIZE];
 PJ_DECL(pj_uint32_t) pj_getpid(void);
 
 /**
+ * Get thread ID.
+ * @return thread ID.
+ */
+PJ_DECL(pj_uint32_t) pj_gettid(void);
+
+/**
  * Create a new thread.
  *
  * @param pool          The memory pool from which the thread record 
@@ -212,6 +228,7 @@ PJ_DECL(pj_status_t) pj_thread_create(  pj_pool_t *pool,
  * be maintained, and this data must remain available during the thread's 
  * lifetime.
  *
+ * @param inst_id       The instance id of pjsua.
  * @param thread_name   The optional name to be assigned to the thread.
  * @param desc          Thread descriptor, which must be available throughout 
  *                      the lifetime of the thread.
@@ -219,16 +236,18 @@ PJ_DECL(pj_status_t) pj_thread_create(  pj_pool_t *pool,
  *
  * @return              PJ_SUCCESS on success, or the error code.
  */
-PJ_DECL(pj_status_t) pj_thread_register ( const char *thread_name,
+PJ_DECL(pj_status_t) pj_thread_register ( int inst_id,
+					  const char *thread_name,
 					  pj_thread_desc desc,
 					  pj_thread_t **thread);
 
 /**
  * Check if this thread has been registered to PJLIB.
  *
+ * @param inst_id The instance id of pjsua.
  * @return		Non-zero if it is registered.
  */
-PJ_DECL(pj_bool_t) pj_thread_is_registered(void);
+PJ_DECL(pj_bool_t) pj_thread_is_registered(int inst_id);
 
 
 /**
@@ -285,6 +304,17 @@ PJ_DECL(int) pj_thread_get_prio_max(pj_thread_t *thread);
 PJ_DECL(void*) pj_thread_get_os_handle(pj_thread_t *thread);
 
 /**
+ * Return native thread id from pj_thread_t.
+ *
+ * @param thread	PJLIB thread descriptor.
+ *
+ * @return		Native thread id. For example, when the
+ *			backend thread uses pthread, this function will
+ *			return pointer to pthread_t, and on Windows,
+ *			this function will return idthread.
+ */
+PJ_DECL(void*) pj_thread_get_thread_id(pj_thread_t *thread);
+/**
  * Get thread name.
  *
  * @param thread    The thread handle.
@@ -305,9 +335,10 @@ PJ_DECL(pj_status_t) pj_thread_resume(pj_thread_t *thread);
 /**
  * Get the current thread.
  *
+ * @param inst_id The instance id of pjsua.
  * @return Thread handle of current thread.
  */
-PJ_DECL(pj_thread_t*) pj_thread_this(void);
+PJ_DECL(pj_thread_t*) pj_thread_this(int inst_id);
 
 /**
  * Join thread, and block the caller thread until the specified thread exits.
@@ -727,7 +758,7 @@ PJ_DECL(pj_status_t) pj_mutex_create_simple( pj_pool_t *pool, const char *name,
  * @return	    PJ_SUCCESS on success, or the error code.
  */
 PJ_DECL(pj_status_t) pj_mutex_create_recursive( pj_pool_t *pool,
-					        const char *name,
+					    const char *name,
 						pj_mutex_t **mutex );
 
 /**
@@ -770,6 +801,14 @@ PJ_DECL(pj_status_t) pj_mutex_destroy(pj_mutex_t *mutex);
  * @return	    Non-zero if yes.
  */
 PJ_DECL(pj_bool_t) pj_mutex_is_locked(pj_mutex_t *mutex);
+
+/**
+ * Get instance id of mutex
+ *
+ * @param mutex	    The mutex.
+ * @return	    PJ_SUCCESS on success, or the error code.
+ */
+PJ_DECL(int) pj_get_mutex_inst_id(pj_mutex_t *mutex);
 
 /**
  * @}
@@ -874,12 +913,12 @@ PJ_DECL(pj_status_t) pj_rwmutex_destroy(pj_rwmutex_t *mutex);
 /**
  * Enter critical section.
  */
-PJ_DECL(void) pj_enter_critical_section(void);
+PJ_DECL(void) pj_enter_critical_section(int inst_id);
 
 /**
  * Leave critical section.
  */
-PJ_DECL(void) pj_leave_critical_section(void);
+PJ_DECL(void) pj_leave_critical_section(int inst_id);
 
 /**
  * @}
@@ -929,6 +968,15 @@ PJ_DECL(pj_status_t) pj_sem_wait(pj_sem_t *sem);
  * @return	PJ_SUCCESS on success, or the error code.
  */
 PJ_DECL(pj_status_t) pj_sem_trywait(pj_sem_t *sem);
+
+/**
+ * Try wait for semaphore2.
+ *
+ * @param sem	The semaphore.
+ *
+ * @return	PJ_SUCCESS on success, or the error code.
+ */
+PJ_DECL(pj_status_t) pj_sem_trywait2(pj_sem_t *sem);
 
 /**
  * Release semaphore.
@@ -1068,6 +1116,14 @@ PJ_DECL(pj_status_t) pj_event_destroy(pj_event_t *event);
  */
 PJ_DECL(pj_status_t) pj_gettimeofday(pj_time_val *tv);
 
+/**
+ * Get current time of day in local representation.
+ *
+ * @param tv	Variable to store the result.
+ *
+ * @return zero if successfull.
+ */
+PJ_DECL(pj_status_t) pj_gettimeofday2(pj_time_val2 *tv);
 
 /**
  * Parse time value into date/time representation.
@@ -1437,7 +1493,7 @@ PJ_DECL(pj_uint32_t) pj_elapsed_cycle( const pj_timestamp *start,
  * Internal PJLIB function to initialize the threading subsystem.
  * @return          PJ_SUCCESS or the appropriate error code.
  */
-pj_status_t pj_thread_init(void);
+pj_status_t pj_thread_init(int inst_id);
 
 
 PJ_END_DECL

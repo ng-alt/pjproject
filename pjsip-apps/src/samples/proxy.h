@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: proxy.h 4404 2013-02-27 14:47:37Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -88,7 +88,7 @@ static pj_status_t init_options(int argc, char *argv[])
 	    break;
 
 	case 'L':
-	    pj_log_set_level(atoi(pj_optarg));
+	    pj_log_set_level(0, atoi(pj_optarg));
 	    break;
 
 	case 'h':
@@ -187,7 +187,7 @@ static pj_status_t init_stack(void)
     pj_status_t status;
 
     /* Must init PJLIB first: */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
@@ -197,7 +197,7 @@ static pj_status_t init_stack(void)
 
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&global.cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &global.cp, &pj_pool_factory_default_policy, 0);
 
     /* Create the endpoint: */
     status = pjsip_endpt_create(&global.cp.factory, NULL, &global.endpt);
@@ -364,9 +364,11 @@ static pj_status_t proxy_verify_request(pjsip_rx_data *rdata)
      */
 
     /* 2. URI scheme.
-     * We only want to support "sip:" URI scheme for this simple proxy.
+     * We only want to support "sip:"/"sips:" URI scheme for this simple proxy.
      */
-    if (!PJSIP_URI_SCHEME_IS_SIP(rdata->msg_info.msg->line.req.uri)) {
+    if (!PJSIP_URI_SCHEME_IS_SIP(rdata->msg_info.msg->line.req.uri) &&
+	!PJSIP_URI_SCHEME_IS_SIPS(rdata->msg_info.msg->line.req.uri))
+    {
 	pjsip_endpt_respond_stateless(global.endpt, rdata, 
 				      PJSIP_SC_UNSUPPORTED_URI_SCHEME, NULL,
 				      NULL, NULL);
@@ -580,6 +582,5 @@ static void destroy_stack(void)
     pj_pool_release(global.pool);
     pj_caching_pool_destroy(&global.cp);
 
-    pj_shutdown();
+    pj_shutdown(0);
 }
-

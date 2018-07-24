@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sdp_neg_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -20,7 +20,10 @@
 #include <pjmedia/sdp.h>
 #include <pjmedia/sdp_neg.h>
 #include "test.h"
+//charles debug
+//#include <errno.h>
 
+//charles debug
 
 #define THIS_FILE   "sdp_neg_test.c"
 #define START_TEST  0
@@ -1331,7 +1334,9 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
     pjmedia_sdp_neg *neg;
     pj_status_t status;
 
-    status = pjmedia_sdp_parse(pool, oa->sdp1, pj_ansi_strlen(oa->sdp1),
+    pj_size_t str_len = pj_ansi_strlen(oa->sdp1);
+
+    status = pjmedia_sdp_parse(0, pool, &oa->sdp1, &str_len,
 				&sdp1);
     if (status != PJ_SUCCESS) {
 	app_perror(status, "   error: unexpected parse status for sdp1");
@@ -1372,8 +1377,9 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	    }
 	}
 
+	str_len = pj_ansi_strlen(oa->sdp2);
 	/* Parse and validate remote answer */
-	status = pjmedia_sdp_parse(pool, oa->sdp2, pj_ansi_strlen(oa->sdp2),
+	status = pjmedia_sdp_parse(0, pool, &oa->sdp2, &str_len,
 				   &sdp2);
 	if (status != PJ_SUCCESS) {
 	    app_perror(status, "   error: parsing sdp2");
@@ -1394,7 +1400,7 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	}
 
 	/* Negotiate remote answer with local answer */
-	status = pjmedia_sdp_neg_negotiate(pool, neg, 0);
+	status = pjmedia_sdp_neg_negotiate(0, pool, neg, 0);
 	if (status != PJ_SUCCESS) {
 	    app_perror(status, "   error: pjmedia_sdp_neg_negotiate");
 	    return -70;
@@ -1407,8 +1413,9 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	    return -80;
 	}
 
+	str_len = pj_ansi_strlen(oa->sdp3);
 	/* Parse and validate the correct active media. */
-	status = pjmedia_sdp_parse(pool, oa->sdp3, pj_ansi_strlen(oa->sdp3),
+	status = pjmedia_sdp_parse(0, pool, &oa->sdp3, &str_len,
 				   &sdp3);
 	if (status != PJ_SUCCESS) {
 	    app_perror(status, "   error: parsing sdp3");
@@ -1422,7 +1429,7 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	}
 
 	/* Compare active with sdp3 */
-	status = pjmedia_sdp_session_cmp(active, sdp3, 0);
+	status = pjmedia_sdp_session_cmp(0, active, sdp3, 0);
 	if (status != PJ_SUCCESS) {
 	    app_perror(status, "   error: active local comparison mismatch");
 	    compare_sdp_string("Logical cmp after negotiatin remote answer",
@@ -1449,8 +1456,10 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	const pjmedia_sdp_session *answer;
 
 	if (oa->sdp2) {
+
+		str_len = pj_ansi_strlen(oa->sdp2);
 	    /* Parse and validate initial local capability */
-	    status = pjmedia_sdp_parse(pool, oa->sdp2, pj_ansi_strlen(oa->sdp2),
+	    status = pjmedia_sdp_parse(0, pool, &oa->sdp2, &str_len,
 				       &sdp2);
 	    if (status != PJ_SUCCESS) {
 		app_perror(status, "   error: parsing sdp2");
@@ -1498,7 +1507,7 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	}
 
 	/* Negotiate. */
-	status = pjmedia_sdp_neg_negotiate(pool, neg, 0);
+	status = pjmedia_sdp_neg_negotiate(0, pool, neg, 0);
 	if (status != PJ_SUCCESS) {
 	    app_perror(status, "   error: pjmedia_sdp_neg_negotiate");
 	    return -240;
@@ -1511,8 +1520,9 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	    return -250;
 	}
 
+	str_len = pj_ansi_strlen(oa->sdp3);
 	/* Parse the correct answer. */
-	status = pjmedia_sdp_parse(pool, oa->sdp3, pj_ansi_strlen(oa->sdp3),
+	status = pjmedia_sdp_parse(0, pool, &oa->sdp3, &str_len,
 				   &sdp3);
 	if (status != PJ_SUCCESS) {
 	    app_perror(status, "   error: parsing sdp3");
@@ -1527,7 +1537,7 @@ static int offer_answer_test(pj_pool_t *pool, pjmedia_sdp_neg **p_neg,
 	}
 
 	/* Compare answer from negotiator and the correct answer */
-	status = pjmedia_sdp_session_cmp(sdp3, answer, 0);
+	status = pjmedia_sdp_session_cmp(0, sdp3, answer, 0);
 	if (status != PJ_SUCCESS) {
 	    compare_sdp_string("Logical cmp after negotiating remote offer",
 			       "Local answer from negotiator", answer,

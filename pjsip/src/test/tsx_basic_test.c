@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: tsx_basic_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -49,7 +49,7 @@ static int tsx_layer_test(void)
 	return -110;
     }
 
-    status = pjsip_tsx_create_uac(NULL, tdata, &tsx);
+    status = pjsip_tsx_create_uac(0, NULL, tdata, &tsx);
     if (status != PJ_SUCCESS) {
 	app_perror("   error: unable to create transaction", status);
 	return -120;
@@ -57,7 +57,7 @@ static int tsx_layer_test(void)
 
     pj_strdup(tdata->pool, &tsx_key, &tsx->transaction_key);
 
-    found = pjsip_tsx_layer_find_tsx(&tsx_key, PJ_FALSE);
+    found = pjsip_tsx_layer_find_tsx(0, &tsx_key, PJ_FALSE);
     if (found != tsx) {
 	return -130;
     }
@@ -95,7 +95,7 @@ static int double_terminate(void)
     }
 
     /* Create transaction. */
-    status = pjsip_tsx_create_uac(NULL, tdata, &tsx);
+    status = pjsip_tsx_create_uac(0, NULL, tdata, &tsx);
     if (status != PJ_SUCCESS) {
 	app_perror("   error: unable to create transaction", status);
 	return -20;
@@ -117,7 +117,7 @@ static int double_terminate(void)
 	return -30;
     }
 
-    tsx = pjsip_tsx_layer_find_tsx(&tsx_key, PJ_TRUE);
+    tsx = pjsip_tsx_layer_find_tsx(0, &tsx_key, PJ_TRUE);
     if (tsx) {
 	/* Terminate transaction again. */
 	pjsip_tsx_terminate(tsx, PJSIP_SC_REQUEST_TERMINATED);

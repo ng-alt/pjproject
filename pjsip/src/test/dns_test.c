@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: dns_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -34,9 +34,12 @@ struct result
 
 static void cb(pj_status_t status,
 	       void *token,
-	       const struct pjsip_server_addresses *addr)
+	       const struct pjsip_server_addresses *addr,
+		   int target_port)
 {
     struct result *result = (struct result*) token;
+
+	PJ_UNUSED_ARG(target_port);
 
     result->status = status;
     if (status == PJ_SUCCESS)

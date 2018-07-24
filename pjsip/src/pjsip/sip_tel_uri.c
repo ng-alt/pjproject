@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_tel_uri.c 4399 2013-02-27 14:26:03Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -93,6 +93,8 @@ static pjsip_uri_vptr tel_uri_vptr =
     (P_CLONE)		&tel_uri_clone
 };
 
+static int is_initialized;
+
 
 PJ_DEF(pjsip_tel_uri*) pjsip_tel_uri_create(pj_pool_t *pool)
 {
@@ -115,9 +117,12 @@ static void *tel_uri_get_uri( pjsip_tel_uri *uri )
 }
 
 
-pj_status_t pjsip_tel_uri_subsys_init(void)
+pj_status_t pjsip_tel_uri_subsys_init(int inst_id)
 {
     pj_status_t status;
+
+	if (is_initialized)
+		return PJ_SUCCESS;
 
     pj_cis_buf_init(&cis_buf);
 
@@ -169,8 +174,10 @@ pj_status_t pjsip_tel_uri_subsys_init(void)
 			&pjsip_TEL_PARSING_PVALUE_SPEC);
     pj_cis_del_str(&pjsip_TEL_PARSING_PVALUE_SPEC_ESC, "%");
 
-    status = pjsip_register_uri_parser("tel", &tel_uri_parse);
+    status = pjsip_register_uri_parser(inst_id, "tel", &tel_uri_parse);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, status);
+
+	is_initialized = 1;
 
     return PJ_SUCCESS;
 }
@@ -182,7 +189,7 @@ static pj_ssize_t tel_uri_print( pjsip_uri_context_e context,
 {
     int printed;
     char *startbuf = buf;
-    char *endbuf = buf+size;
+    char *endbuf = buf+size-1;
     const pjsip_parser_const_t *pc = pjsip_parser_const();
 
     PJ_UNUSED_ARG(context);
@@ -216,6 +223,8 @@ static pj_ssize_t tel_uri_print( pjsip_uri_context_e context,
     if (printed < 0)
 	return -1;
     buf += printed;
+
+    *buf = '\0';
 
     return (buf-startbuf);
 }
@@ -379,9 +388,9 @@ static void* tel_uri_parse( pj_scanner *scanner, pj_pool_t *pool,
     /* Parse scheme. */
     pj_scan_get(scanner, &pc->pjsip_TOKEN_SPEC, &token);
     if (pj_scan_get_char(scanner) != ':')
-	PJ_THROW(PJSIP_SYN_ERR_EXCEPTION);
+	PJ_THROW(scanner->inst_id, PJSIP_SYN_ERR_EXCEPTION[scanner->inst_id]);
     if (pj_stricmp_alnum(&token, &pc->pjsip_TEL_STR) != 0)
-	PJ_THROW(PJSIP_SYN_ERR_EXCEPTION);
+	PJ_THROW(scanner->inst_id, PJSIP_SYN_ERR_EXCEPTION[scanner->inst_id]);
 
     /* Create URI */
     uri = pjsip_tel_uri_create(pool);

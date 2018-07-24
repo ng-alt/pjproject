@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: tsx_uac_test.c 4385 2013-02-27 10:11:59Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -159,7 +159,7 @@ static struct my_timer
  */
 static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 {
-    if (pj_strcmp2(&tsx->branch, TEST1_BRANCH_ID)==0) {
+    if (pj_stricmp2(&tsx->branch, TEST1_BRANCH_ID)==0) {
 	/*
 	 * Transaction with TEST1_BRANCH_ID should terminate with transaction
 	 * timeout status.
@@ -213,7 +213,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 	    }
 	}
 
-    } else if (pj_strcmp2(&tsx->branch, TEST2_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST2_BRANCH_ID)==0) {
 	/*
 	 * Transaction with TEST2_BRANCH_ID should terminate with transport error.
 	 */
@@ -231,7 +231,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 		test_complete = 1;
 	}
 
-    } else if (pj_strcmp2(&tsx->branch, TEST3_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST3_BRANCH_ID)==0) {
 	/*
 	 * This test terminates the transaction while resolver is still
 	 * running. 
@@ -256,7 +256,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 
 	}
 
-    } else if (pj_strcmp2(&tsx->branch, TEST4_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST4_BRANCH_ID)==0) {
 	/* 
 	 * This test simulates transport failure after several 
 	 * retransmissions.
@@ -284,7 +284,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 	}
 
 
-    } else if (pj_strcmp2(&tsx->branch, TEST5_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST5_BRANCH_ID)==0) {
 	/* 
 	 * This test simulates transport failure after several 
 	 * retransmissions.
@@ -312,7 +312,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 	}
 
 
-    } else if (pj_strcmp2(&tsx->branch, TEST6_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST6_BRANCH_ID)==0) {
 	/* 
 	 * Successfull non-INVITE transaction.
 	 */
@@ -355,7 +355,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 
 	}
 
-    } else if (pj_strcmp2(&tsx->branch, TEST7_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST7_BRANCH_ID)==0) {
 	/* 
 	 * Successfull non-INVITE transaction.
 	 */
@@ -408,7 +408,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 	}
 
 
-    } else if (pj_strcmp2(&tsx->branch, TEST8_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST8_BRANCH_ID)==0) {
 	/* 
 	 * Failed INVITE transaction.
 	 */
@@ -468,7 +468,7 @@ static void tsx_user_on_tsx_state(pjsip_transaction *tsx, pjsip_event *e)
 	}
 
 
-    } else if (pj_strcmp2(&tsx->branch, TEST9_BRANCH_ID)==0) {
+    } else if (pj_stricmp2(&tsx->branch, TEST9_BRANCH_ID)==0) {
 	/* 
 	 * Failed INVITE transaction with provisional response.
 	 */
@@ -563,7 +563,7 @@ static void terminate_tsx_callback( pj_timer_heap_t *timer_heap,
 				    struct pj_timer_entry *entry)
 {
     struct my_timer *m = (struct my_timer *)entry;
-    pjsip_transaction *tsx = pjsip_tsx_layer_find_tsx(&m->tsx_key, PJ_FALSE);
+    pjsip_transaction *tsx = pjsip_tsx_layer_find_tsx(0, &m->tsx_key, PJ_FALSE);
     int status_code = entry->id;
 
     PJ_UNUSED_ARG(timer_heap);
@@ -583,7 +583,7 @@ static void terminate_tsx_callback( pj_timer_heap_t *timer_heap,
  */
 static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 {
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST1_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST1_BRANCH_ID) == 0) {
 	/*
 	 * The TEST1_BRANCH_ID test performs the verifications for transaction
 	 * retransmission mechanism. It will not answer the incoming request
@@ -651,7 +651,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 	return PJ_TRUE;
 
     } else
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST4_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST4_BRANCH_ID) == 0) {
 	/*
 	 * The TEST4_BRANCH_ID test simulates transport failure after several
 	 * retransmissions.
@@ -672,7 +672,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 
 
     } else
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST5_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST5_BRANCH_ID) == 0) {
 	/*
 	 * The TEST5_BRANCH_ID test simulates user terminating the transaction
 	 * after several retransmissions.
@@ -685,7 +685,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 
 	    pjsip_tsx_create_key( rdata->tp_info.pool, &key, PJSIP_ROLE_UAC,
 				  &rdata->msg_info.msg->line.req.method, rdata);
-	    tsx = pjsip_tsx_layer_find_tsx(&key, PJ_TRUE);
+	    tsx = pjsip_tsx_layer_find_tsx(0, &key, PJ_TRUE);
 	    if (tsx) {
 		pjsip_tsx_terminate(tsx, PJSIP_SC_REQUEST_TERMINATED);
 		pj_mutex_unlock(tsx->mutex);
@@ -703,7 +703,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 	return PJ_TRUE;
 
     } else
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST6_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST6_BRANCH_ID) == 0) {
 	/*
 	 * The TEST6_BRANCH_ID test successfull non-INVITE transaction.
 	 */
@@ -728,7 +728,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 
 
     } else
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST7_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST7_BRANCH_ID) == 0) {
 	/*
 	 * The TEST7_BRANCH_ID test successfull non-INVITE transaction
 	 * with provisional response.
@@ -778,7 +778,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 
 
     } else
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST8_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST8_BRANCH_ID) == 0) {
 	/*
 	 * The TEST8_BRANCH_ID test failed INVITE transaction.
 	 */
@@ -841,7 +841,7 @@ static pj_bool_t msg_receiver_on_rx_request(pjsip_rx_data *rdata)
 
 
     } else
-    if (pj_strcmp2(&rdata->msg_info.via->branch_param, TEST9_BRANCH_ID) == 0) {
+    if (pj_stricmp2(&rdata->msg_info.via->branch_param, TEST9_BRANCH_ID) == 0) {
 	/*
 	 * The TEST9_BRANCH_ID test failed INVITE transaction with
 	 * provisional response.
@@ -984,7 +984,7 @@ static int perform_tsx_test(int dummy, char *target_uri, char *from_uri,
     pjsip_tx_data_add_ref(tdata);
 
     /* Create transaction. */
-    status = pjsip_tsx_create_uac( &tsx_user, tdata, &tsx);
+    status = pjsip_tsx_create_uac( 0, &tsx_user, tdata, &tsx);
     if (status != PJ_SUCCESS) {
 	app_perror("   Error: unable to create UAC transaction", status);
 	pjsip_tx_data_dec_ref(tdata);
@@ -1024,7 +1024,7 @@ static int perform_tsx_test(int dummy, char *target_uri, char *from_uri,
     }
 
     if (test_complete < 0) {
-	tsx = pjsip_tsx_layer_find_tsx(&tsx_key, PJ_TRUE);
+	tsx = pjsip_tsx_layer_find_tsx(0, &tsx_key, PJ_TRUE);
 	if (tsx) {
 	    pjsip_tsx_terminate(tsx, PJSIP_SC_REQUEST_TERMINATED);
 	    pj_mutex_unlock(tsx->mutex);
@@ -1051,7 +1051,7 @@ static int perform_tsx_test(int dummy, char *target_uri, char *from_uri,
     }
 
     /* Make sure transaction has been destroyed. */
-    if (pjsip_tsx_layer_find_tsx(&tsx_key, PJ_FALSE) != NULL) {
+    if (pjsip_tsx_layer_find_tsx(0, &tsx_key, PJ_FALSE) != NULL) {
 	PJ_LOG(3,(THIS_FILE, "   Error: transaction has not been destroyed"));
 	pjsip_tx_data_dec_ref(tdata);
 	return -140;
@@ -1453,4 +1453,3 @@ int tsx_uac_test(struct tsx_test_param *param)
 
     return 0;
 }
-

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ip_helper_win32.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -18,6 +18,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 #include <pj/config.h>
+#include <pj/log.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -40,6 +41,8 @@
 #include <pj/assert.h>
 #include <pj/errno.h>
 #include <pj/string.h>
+
+#define THIS_FILE	"ip_helper_win32.c"
 
 /* Dealing with Unicode quirks:
 
@@ -100,8 +103,9 @@ static PFN_GetIpForwardTable s_pfnGetIpForwardTable;
 static PFN_GetIfEntry s_pfnGetIfEntry;
 
 
-static void unload_iphlp_module(void)
+static void unload_iphlp_module(int inst_id)
 {
+	PJ_UNUSED_ARG(inst_id);
     FreeLibrary(s_hDLL);
     s_hDLL = NULL;
     s_pfnGetIpAddrTable = NULL;
@@ -115,7 +119,7 @@ static FARPROC GetIpHlpApiProc(gpa_char *lpProcName)
     if(NULL == s_hDLL) {
 	s_hDLL = LoadLibrary(PJ_T("IpHlpApi"));
 	if(NULL != s_hDLL) {
-	    pj_atexit(&unload_iphlp_module);
+	    pj_atexit(0, &unload_iphlp_module);
 	}
     }
 	
@@ -262,6 +266,8 @@ static pj_status_t enum_ipv4_interface(unsigned *p_cnt,
     if (pTab != (MIB_IPADDRTABLE*)ipTabBuff)
 	free(pTab);
 
+	if (!*p_cnt)
+		PJ_LOG(4, ("ip_helper_win32.c", "enum_ipv4_interface() interface not found."));
     return (*p_cnt) ? PJ_SUCCESS : PJ_ENOTFOUND;
 }
 
@@ -356,6 +362,8 @@ static pj_status_t enum_ipv4_ipv6_interface(int af,
 	free(adapterBuf);
 
     *p_cnt = i;
+	if (!*p_cnt)
+		PJ_LOG(4, ("ip_helper_win32.c", "enum_ipv4_ipv6_interface() interface not found."));
     return (*p_cnt) ? PJ_SUCCESS : PJ_ENOTFOUND;
 }
 
@@ -439,3 +447,320 @@ PJ_DEF(pj_status_t) pj_enum_ip_route(unsigned *p_cnt,
     return PJ_SUCCESS;
 }
 
+PJ_DEF(pj_status_t) pj_get_physical_address_by_ip(int af,
+						   pj_sockaddr addr,
+						   unsigned char *physical_addr,
+						   pj_uint32_t *physical_addr_len,
+						   char *ifname,
+						   pj_uint32_t *ifname_len)
+{
+    pj_uint8_t buffer[600];
+    IP_ADAPTER_ADDRESSES *adapter = (IP_ADAPTER_ADDRESSES*)buffer;
+    void *adapterBuf = NULL;
+    ULONG size = sizeof(buffer);
+    ULONG flags;
+    unsigned i;
+    DWORD rc;
+	pj_status_t status = PJ_ENOTFOUND;
+
+	PJ_ASSERT_RETURN(physical_addr && physical_addr_len, PJ_EINVAL);
+	PJ_ASSERT_RETURN(*physical_addr_len >= 6, PJ_ETOOSMALL);
+
+    flags = GAA_FLAG_SKIP_FRIENDLY_NAME |
+	    GAA_FLAG_SKIP_DNS_SERVER |
+	    GAA_FLAG_SKIP_MULTICAST;
+
+    rc = MyGetAdapterAddresses(af, flags, NULL, adapter, &size);
+    if (rc != ERROR_SUCCESS) {
+		if (rc == ERROR_BUFFER_OVERFLOW) {
+			/* Retry with larger memory size */
+			adapterBuf = malloc(size);
+			adapter = (IP_ADAPTER_ADDRESSES*) adapterBuf;
+			if (adapter != NULL)
+			rc = MyGetAdapterAddresses(af, flags, NULL, adapter, &size);
+		} 
+
+		if (rc != ERROR_SUCCESS) {
+			if (adapterBuf)
+			free(adapterBuf);
+			return PJ_RETURN_OS_ERROR(rc);
+		}
+
+		/* Enumerate interface */
+		for (i=0; i<8 && adapter; adapter = adapter->Next) {
+			if (adapter->FirstUnicastAddress) {
+				SOCKET_ADDRESS *pAddr = &adapter->FirstUnicastAddress->Address;
+				pj_sockaddr_in *addr_in;
+
+				/* Ignore address family which we didn't request, just in case */
+				if (pAddr->lpSockaddr->sa_family != PJ_AF_INET &&
+				pAddr->lpSockaddr->sa_family != PJ_AF_INET6)
+				{
+				continue;
+				}
+
+				/* Apply some filtering to known IPv4 unusable addresses */
+				if (pAddr->lpSockaddr->sa_family == PJ_AF_INET) {
+				addr_in = (pj_sockaddr_in*)pAddr->lpSockaddr;
+
+				/* Ignore 0.0.0.0 address (interface is down?) */
+				if (addr_in->sin_addr.s_addr == 0)
+					continue;
+
+				/* Ignore 0.0.0.0/8 address. This is a special address
+				 * which doesn't seem to have practical use.
+				 */
+				if ((pj_ntohl(addr_in->sin_addr.s_addr) >> 24) == 0)
+					continue;
+				}
+
+		#if PJ_IP_HELPER_IGNORE_LOOPBACK_IF
+				/* Ignore loopback interfaces */
+				/* This should have been IF_TYPE_SOFTWARE_LOOPBACK according to
+				 * MSDN, and this macro should have been declared in Ipifcons.h, 
+				 * but some SDK versions don't have it.
+				 */
+				if (adapter->IfType == MIB_IF_TYPE_LOOPBACK)
+				continue;
+		#endif
+
+				/* Ignore down interface */
+				if (adapter->OperStatus != IfOperStatusUp)
+					continue;
+
+				if (adapter->PhysicalAddressLength > *physical_addr_len)
+					return PJ_ENOMEM;
+
+				*physical_addr_len = adapter->PhysicalAddressLength;
+				pj_sockaddr_set_port(addr_in, 0);
+				pj_sockaddr_set_port(&addr, 0);
+				if (pj_sockaddr_cmp(addr_in, &addr) == 0)
+				{
+					memcpy(physical_addr, adapter->PhysicalAddress, *physical_addr_len);
+
+					// DEAN 2013-11-19
+					if (ifname && ifname_len)
+					{
+						if (*ifname_len < strlen(adapter->AdapterName))
+							return PJ_ETOOSMALL;
+						memset(ifname, 0, *ifname_len);
+						*ifname_len = strlen(adapter->AdapterName);
+						memcpy(ifname, adapter->AdapterName, *ifname_len);
+					}
+					status = PJ_SUCCESS;
+					break;
+				}
+			}
+		}
+
+		if (adapterBuf)
+		free(adapterBuf);
+
+		if (status == PJ_ENOTFOUND)
+			PJ_LOG(4, ("ip_helper_win32.c", "pj_get_physical_address_by_ip() interface not found(1)."));
+		return status;
+	}
+	if (status == PJ_ENOTFOUND)
+		PJ_LOG(4, ("ip_helper_win32.c", "pj_get_physical_address_by_ip() interface not found(1)."));
+	return status;
+}
+
+PJ_DEF(pj_status_t) pj_physical_address(char *local_addr, char *local_mac, pj_uint32_t *local_mac_len) {
+	pj_sockaddr      s_addr;
+	unsigned char    mac[6];
+	unsigned long    mac_len = sizeof(mac);
+	pj_status_t      status = PJ_SUCCESS;
+
+	PJ_ASSERT_RETURN(local_mac && local_mac_len, PJ_EINVAL);
+	PJ_ASSERT_RETURN(*local_mac_len >= 17, PJ_ETOOSMALL);
+
+	if (!local_addr)
+	{
+		// get local default ip address
+		status = pj_getdefaultipinterface(pj_AF_INET(), &s_addr);
+		if (status != PJ_SUCCESS)
+			return status;
+	} 
+	else
+	{
+		pj_str_t addr = pj_str(local_addr);
+		// convert address string to pj_sock_addr
+		status = pj_sockaddr_in_set_str_addr((pj_sockaddr_in *)&s_addr, &addr);
+		if (status != PJ_SUCCESS)
+			return status;
+	}
+
+	status = pj_get_physical_address_by_ip(pj_AF_INET(), s_addr, mac, (pj_uint32_t *)&mac_len,
+		NULL, NULL);
+	if (status != PJ_SUCCESS)
+	{
+		printf("pj_default_physical_address() failed status=%d\n", status);
+		return status;
+	}
+
+	// construct string format target hardware address
+	sprintf(local_mac, "%02X:%02X:%02X:%02X:%02X:%02X", 
+		mac[0]&0xff, mac[1]&0xff, mac[2]&0xff,
+		mac[3]&0xff, mac[4]&0xff, mac[5]&0xff);
+
+	*local_mac_len = 17;
+	return status;
+}
+
+PJ_DEF(pj_status_t) pj_all_physical_addresses(char *local_mac, 
+											   pj_uint32_t *local_mac_len)
+{
+	pj_uint8_t buffer[600];
+	char mac_addrs[4500];
+	pj_uint32_t mac_addrs_len = 0;
+    IP_ADAPTER_ADDRESSES *adapter = (IP_ADAPTER_ADDRESSES*)buffer;
+    void *adapterBuf = NULL;
+    ULONG size = sizeof(buffer);
+    ULONG flags;
+    unsigned i;
+    DWORD rc;
+	pj_status_t status = PJ_ENOTFOUND;
+
+	PJ_ASSERT_RETURN(local_mac && local_mac_len, PJ_EINVAL);
+
+    flags = GAA_FLAG_SKIP_FRIENDLY_NAME |
+	    GAA_FLAG_SKIP_DNS_SERVER |
+	    GAA_FLAG_SKIP_MULTICAST;
+
+    rc = MyGetAdapterAddresses(pj_AF_INET(), flags, NULL, adapter, &size);
+    if (rc != ERROR_SUCCESS) {
+		if (rc == ERROR_BUFFER_OVERFLOW) {
+			/* Retry with larger memory size */
+			adapterBuf = malloc(size);
+			adapter = (IP_ADAPTER_ADDRESSES*) adapterBuf;
+			if (adapter != NULL)
+			rc = MyGetAdapterAddresses(pj_AF_INET(), flags, NULL, adapter, &size);
+		} 
+
+		if (rc != ERROR_SUCCESS) {
+			if (adapterBuf)
+			free(adapterBuf);
+			return PJ_RETURN_OS_ERROR(rc);
+		}
+
+		/* Enumerate interface */
+		memset(mac_addrs, 0, sizeof(mac_addrs));
+		for (i=0; i<8 && adapter; adapter = adapter->Next) {
+			char tmp_mac[18];
+			if (adapter->FirstUnicastAddress) {
+
+		#if PJ_IP_HELPER_IGNORE_LOOPBACK_IF
+				/* Ignore loopback interfaces */
+				/* This should have been IF_TYPE_SOFTWARE_LOOPBACK according to
+				 * MSDN, and this macro should have been declared in Ipifcons.h, 
+				 * but some SDK versions don't have it.
+				 */
+				if (adapter->IfType == MIB_IF_TYPE_LOOPBACK)
+				{
+					PJ_LOG(2, (THIS_FILE, " pj_all_physical_addresses() skip loopback interface."));
+					continue;
+				}
+		#endif
+
+				/* Ignore down interface */
+				if (adapter->OperStatus != IfOperStatusUp)
+				{
+					PJ_LOG(2, (THIS_FILE, " pj_all_physical_addresses() interface status is not up."));
+					continue;
+				}
+
+
+				if (adapter->PhysicalAddressLength != 6)
+				{
+					PJ_LOG(2, (THIS_FILE, " pj_all_physical_addresses() interface physical addrs len is not 6."));
+					continue;
+				}
+
+				// construct string format target hardware address
+				sprintf(tmp_mac, "%02X:%02X:%02X:%02X:%02X:%02X",
+					adapter->PhysicalAddress[0]&0xff, adapter->PhysicalAddress[1]&0xff, adapter->PhysicalAddress[2]&0xff,
+					adapter->PhysicalAddress[3]&0xff, adapter->PhysicalAddress[4]&0xff, adapter->PhysicalAddress[5]&0xff);
+
+				if(strstr(mac_addrs, tmp_mac))
+				{
+					PJ_LOG(4, (THIS_FILE, " pj_all_physical_addresses() tmp_mac[%s] already exists in mak_addrs[%s]", tmp_mac, mac_addrs));
+					continue; /* Skip point-to-poi interface */
+				}
+
+
+				PJ_LOG(4, (THIS_FILE, " pj_all_physical_addresses() tmp_mac %s", tmp_mac));
+				if (mac_addrs_len == 0)
+				{
+					sprintf(mac_addrs, "%s", tmp_mac);
+					mac_addrs_len += 17;
+				}
+				else
+				{
+					sprintf(mac_addrs, "%s,%s", mac_addrs, tmp_mac);
+					mac_addrs_len += 18;
+				}
+			}
+		}
+
+		if (adapterBuf)
+			free(adapterBuf);
+
+		// check if there is enuough memory
+		if (mac_addrs_len > *local_mac_len)
+		{
+			PJ_LOG(1, (THIS_FILE, " pj_all_physical_addresses() buffer size[%d] too small. needed[%d]",
+				*local_mac_len, mac_addrs_len));
+			return PJ_ETOOSMALL;
+		}
+
+		memset(local_mac, 0, sizeof(local_mac));
+		memcpy(local_mac, mac_addrs, mac_addrs_len);
+		*local_mac_len = mac_addrs_len;
+
+		if (status == PJ_ENOTFOUND)
+			PJ_LOG(4, ("ip_helper_win32.c", "pj_all_physical_addresses() interface not found(1)."));
+		return status;
+	}
+	if (status == PJ_ENOTFOUND)
+		PJ_LOG(4, ("ip_helper_win32.c", "pj_all_physical_addresses() interface not found(2)."));
+	return status;
+}
+
+PJ_DEF(pj_status_t) pj_resolve_mac_by_arp(char *target_addr, char *target_mac, 
+										  pj_uint32_t *target_mac_len, int timeout) {
+   pj_sockaddr      s_addr;
+   pj_status_t      status = PJ_SUCCESS;
+   pj_in_addr dst_addr;
+   unsigned char dst_mac[6];
+   unsigned long dst_mac_len = sizeof(dst_mac);
+   pj_timestamp start, end;
+   dst_addr = pj_inet_addr2(target_addr);
+
+   PJ_UNUSED_ARG(timeout);
+
+   PJ_ASSERT_RETURN(target_addr && target_mac && target_mac_len, PJ_EINVAL);
+   PJ_ASSERT_RETURN(*target_mac_len >= 17, PJ_ETOOSMALL);
+
+	// get local default ip address
+   status = pj_getdefaultipinterface(pj_AF_INET(), &s_addr);
+   if (status != PJ_SUCCESS)
+	   return status;
+
+   // send ARP packet
+   pj_get_timestamp(&start);
+   status = SendARP(dst_addr.s_addr, s_addr.ipv4.sin_addr.s_addr, dst_mac, &dst_mac_len);
+   pj_get_timestamp(&end);
+   printf("Send ARP consume %d ms\n", pj_elapsed_msec(&start, &end));
+   if (status != PJ_SUCCESS)
+	   return status;
+
+   // construct string format target hardware address
+   sprintf(target_mac, "%02X:%02X:%02X:%02X:%02X:%02X", 
+	   dst_mac[0]&0xff, dst_mac[1]&0xff, dst_mac[2]&0xff,
+	   dst_mac[3]&0xff, dst_mac[4]&0xff, dst_mac[5]&0xff);
+
+   *target_mac_len = 17;
+
+   return status;
+
+}

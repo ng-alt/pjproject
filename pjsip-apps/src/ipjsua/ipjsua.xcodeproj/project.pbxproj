@@ -389,7 +389,7 @@
 				);
 				OTHER_CFLAGS = "";
 				PREBINDING = NO;
-				SDKROOT = iphoneos3.2;
+				SDKROOT = iphoneos5.1;
 			};
 			name = Debug;
 		};
@@ -419,7 +419,7 @@
 				);
 				OTHER_CFLAGS = "";
 				PREBINDING = NO;
-				SDKROOT = iphoneos3.2;
+				SDKROOT = iphoneos5.1;
 			};
 			name = Release;
 		};

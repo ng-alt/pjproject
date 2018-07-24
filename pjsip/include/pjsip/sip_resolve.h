@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_resolve.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -201,10 +201,12 @@ typedef struct pjsip_server_addresses
  * @param token	    The token that was associated with the job when application
  *		    call the resolve function.
  * @param addr	    The addresses resolved by the operation.
+ * @param target_prt 2013-05-15 DEAN. To determine transport type (TCP or TLS)
  */
 typedef void pjsip_resolver_callback(pj_status_t status,
 				     void *token,
-				     const struct pjsip_server_addresses *addr);
+				     const struct pjsip_server_addresses *addr,
+					 int target_port);
 
 /**
  * Create SIP resolver engine. Note that this function is normally called

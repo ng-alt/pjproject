@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sock_bsd.c 4387 2013-02-27 10:16:08Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -25,6 +25,19 @@
 #include <pj/addr_resolv.h>
 #include <pj/errno.h>
 #include <pj/unicode.h>
+#include <pj/log.h>
+
+#define THIS_FILE "sock_bsd.c"
+
+#if defined(PJ_WIN32) && PJ_WIN32
+/* Argument structure for SIO_KEEPALIVE_VALS */
+
+struct tcp_keepalive {
+	ULONG onoff;
+	ULONG keepalivetime;
+	ULONG keepaliveinterval;
+};
+#endif
 
 /*
  * Address families conversion.
@@ -135,6 +148,7 @@ const pj_uint16_t PJ_SO_RCVBUF  = SO_RCVBUF;
 const pj_uint16_t PJ_SO_SNDBUF  = SO_SNDBUF;
 const pj_uint16_t PJ_TCP_NODELAY= TCP_NODELAY;
 const pj_uint16_t PJ_SO_REUSEADDR= SO_REUSEADDR;
+const pj_uint16_t PJ_SO_BROADCAST= SO_BROADCAST;
 #ifdef SO_NOSIGPIPE
 const pj_uint16_t PJ_SO_NOSIGPIPE = SO_NOSIGPIPE;
 #else
@@ -160,6 +174,28 @@ const pj_uint16_t PJ_IP_MULTICAST_TTL   = 0xFFFF;
 const pj_uint16_t PJ_IP_MULTICAST_LOOP  = 0xFFFF;
 const pj_uint16_t PJ_IP_ADD_MEMBERSHIP  = 0xFFFF;
 const pj_uint16_t PJ_IP_DROP_MEMBERSHIP = 0xFFFF;
+#endif
+
+const pj_uint16_t PJ_SO_KEEPALIVE= SO_KEEPALIVE;
+#ifdef TCP_KEEPALIVE
+const pj_uint16_t PJ_TCP_KEEPALIVE = TCP_KEEPALIVE;
+#else
+const pj_uint16_t PJ_TCP_KEEPALIVE = 16;
+#endif
+#ifdef TCP_KEEPIDLE
+const pj_uint16_t PJ_TCP_KEEPIDLE = TCP_KEEPIDLE;
+#else
+const pj_uint16_t PJ_TCP_KEEPIDLE = 4;
+#endif
+#ifdef TCP_KEEPINTVL
+const pj_uint16_t PJ_TCP_KEEPINTVL = TCP_KEEPINTVL;
+#else
+const pj_uint16_t PJ_TCP_KEEPINTVL = 5;
+#endif
+#ifdef TCP_KEEPCNT
+const pj_uint16_t PJ_TCP_KEEPCNT = TCP_KEEPCNT;
+#else
+const pj_uint16_t PJ_TCP_KEEPCNT = 6;
 #endif
 
 /* recv() and send() flags */
@@ -267,7 +303,7 @@ PJ_DEF(int) pj_inet_aton(const pj_str_t *cp, struct pj_in_addr *inp)
  */
 PJ_DEF(pj_status_t) pj_inet_pton(int af, const pj_str_t *src, void *dst)
 {
-    char tempaddr[PJ_INET6_ADDRSTRLEN];
+	char tempaddr[PJ_INET6_ADDRSTRLEN];
 
     PJ_ASSERT_RETURN(af==PJ_AF_INET || af==PJ_AF_INET6, PJ_EAFNOTSUP);
     PJ_ASSERT_RETURN(src && src->slen && dst, PJ_EINVAL);
@@ -294,12 +330,12 @@ PJ_DEF(pj_status_t) pj_inet_pton(int af, const pj_str_t *src, void *dst)
     /*
      * Implementation using inet_pton()
      */
-    if (inet_pton(af, tempaddr, dst) != 1) {
-	pj_status_t status = pj_get_netos_error();
-	if (status == PJ_SUCCESS)
-	    status = PJ_EUNKNOWN;
+    if ( inet_pton(af, tempaddr, dst) != 1) {
+        pj_status_t status = pj_get_netos_error();
+        if (status == PJ_SUCCESS)      
+            status = PJ_EUNKNOWN;
 
-	return status;
+        return status;
     }
 
     return PJ_SUCCESS;
@@ -473,8 +509,8 @@ PJ_DEF(pj_status_t) pj_sock_socket(int af,
     PJ_CHECK_STACK();
 
     /* Sanity checks. */
-    PJ_ASSERT_RETURN(sock!=NULL, PJ_EINVAL);
-    PJ_ASSERT_RETURN((unsigned)PJ_INVALID_SOCKET==INVALID_SOCKET, 
+	PJ_ASSERT_RETURN(sock!=NULL, PJ_EINVAL);	
+    PJ_ASSERT_RETURN((SOCKET)PJ_INVALID_SOCKET==INVALID_SOCKET, 
                      (*sock=PJ_INVALID_SOCKET, PJ_EINVAL));
 
     *sock = WSASocket(af, type, proto, NULL, 0, WSA_FLAG_OVERLAPPED);
@@ -549,6 +585,97 @@ PJ_DEF(pj_status_t) pj_sock_socket(int af,
 }
 #endif
 
+PJ_DEF(pj_status_t) pj_sock_set_tcp_timeout(pj_sock_t *sock, 
+				   int tcp_timeout  //in seconds.
+				   )
+{
+#ifdef PJ_WIN32
+
+#ifndef SIO_KEEPALIVE_VALS
+#define SIO_KEEPALIVE_VALS    _WSAIOW(IOC_VENDOR,4)
+#endif
+
+	DWORD dwBytesReturned = 0;
+	struct tcp_keepalive tcp_ka = {0};
+	DWORD rc = 0;
+
+	PJ_CHECK_STACK();
+
+	/* Sanity checks. */
+	PJ_ASSERT_RETURN(sock!=NULL, PJ_EINVAL);
+
+	tcp_ka.keepalivetime = tcp_timeout * 1000;
+	tcp_ka.keepaliveinterval = 2000;
+	tcp_ka.onoff = 1;
+
+	rc = WSAIoctl(*sock, SIO_KEEPALIVE_VALS,
+		      &tcp_ka, sizeof(tcp_ka),
+		      NULL, 0, &dwBytesReturned,
+		      NULL, NULL);
+
+	if (rc==SOCKET_ERROR) {
+		printf("%d\n", WSAGetLastError());
+	    // Ignored..
+	}
+#else
+	pj_status_t status;
+
+	int flag;
+
+	PJ_CHECK_STACK();
+
+	/* Sanity checks. */
+	PJ_ASSERT_RETURN(sock!=NULL, PJ_EINVAL);
+
+	PJ_LOG(4, (THIS_FILE, "pj_sock_set_tcp_timeout() tcp_timeout=%d", tcp_timeout));
+
+	flag = 1;
+	status = pj_sock_setsockopt(*sock, pj_SOL_SOCKET(), pj_SO_KEEPALIVE(),
+		&flag, sizeof(flag));
+	if (status != PJ_SUCCESS) {
+	    PJ_LOG(1, (THIS_FILE, "pj_sock_set_tcp_timeout() pj_SO_KEEPALIVE() failed. status=%d", status));
+		return status;
+	}
+
+	flag = tcp_timeout;
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+	status = pj_sock_setsockopt(*sock, pj_SOL_TCP(), pj_TCP_KEEPALIVE(),
+		&flag, sizeof(flag));
+	if (status != PJ_SUCCESS) {
+	    PJ_LOG(1, (THIS_FILE, "pj_sock_set_tcp_timeout() pj_TCP_KEEPALIVE() failed. status=%d", status));
+		return status;
+	}
+#else
+	status = pj_sock_setsockopt(*sock, pj_SOL_TCP(), pj_TCP_KEEPIDLE(),
+		&flag, sizeof(flag));
+	if (status != PJ_SUCCESS) {
+		PJ_LOG(1, (THIS_FILE, "pj_sock_set_tcp_timeout() pj_TCP_KEEPIDLE() failed. status=%d", status));
+		return status;
+	}
+#endif
+
+	flag = 2;  // 2 seconds.
+	status = pj_sock_setsockopt(*sock, pj_SOL_TCP(), pj_TCP_KEEPINTVL(),
+		&flag, sizeof(flag));
+	if (status != PJ_SUCCESS) {
+	    PJ_LOG(1, (THIS_FILE, "pj_sock_set_tcp_timeout() pj_TCP_KEEPINTVL() failed. status=%d", status));
+		return status;
+	}
+
+	flag = 3;  // retry three times.
+	status = pj_sock_setsockopt(*sock, pj_SOL_TCP(), pj_TCP_KEEPCNT(),
+		&flag, sizeof(flag));
+	if (status != PJ_SUCCESS) {
+	    PJ_LOG(1, (THIS_FILE, "pj_sock_set_tcp_timeout() pj_TCP_KEEPCNT() failed. status=%d", status));
+		return status;
+	}
+
+
+#endif
+
+    return PJ_SUCCESS;
+}
+
 /*
  * Bind socket.
  */
@@ -582,7 +709,11 @@ PJ_DEF(pj_status_t) pj_sock_bind_in( pj_sock_t sock,
 
     PJ_SOCKADDR_SET_LEN(&addr, sizeof(pj_sockaddr_in));
     addr.sin_family = PJ_AF_INET;
+#if PJ_ANDROID==1
+    //memset(addr.sin_zero, 0 , sizeof(addr.sin_zero));
+#else
     pj_bzero(addr.sin_zero, sizeof(addr.sin_zero));
+#endif
     addr.sin_addr.s_addr = pj_htonl(addr32);
     addr.sin_port = pj_htons(port);
 
@@ -642,6 +773,112 @@ PJ_DEF(pj_status_t) pj_sock_getsockname( pj_sock_t sock,
 	return PJ_SUCCESS;
     }
 }
+#if PJ_ANDROID==1
+char sip_inv_buff[1800];
+#define SIN_INV_DATA_C \
+"INVITE sip:test_1@192.168.123.251 SIP/2.0\r\n\
+Via: SIP/2.0/TCP 192.168.0.197:36042;rport;branch=z9hG4bKPjKfwp4P35.iiHbfoEgD8TiriJUBCiKcF4\r\n\
+Max-Forwards: 70\r\n\
+From: sip:test_2@192.168.123.251;tag=WH0ENtpm2-hAtRN7zLg6uSeHNo6poRuF\r\n\
+To: sip:test_1@192.168.123.251\r\n\
+Contact: <sip:test_2@192.168.123.249:45190;ob>;+sip.ice\r\n\
+Call-ID: ylPAkXbbOesLazc.v2SFpk.0gr43lLY3\r\n\
+CSeq: 4255 INVITE\r\n\
+Allow: PRACK, INVITE, ACK, BYE, CANCEL, UPDATE, SUBSCRIBE, NOTIFY, REFER, MESSAGE, OPTIONS\r\n\
+Supported: replaces, 100rel, timer, norefersub\r\n\
+Session-Expires: 1800\r\n\
+Min-SE: 90\r\n\
+User-Agent: PJSUA v1.12.0 Linux-2.6.39.4/armv7l\r\n\
+Content-Type: application/sdp\r\n\
+Content-Length:   855\r\n\
+\r\n\
+v=0\r\n\
+o=- 3547528715 3547528715 IN IP4 192.168.123.251\r\n\
+s=pjmedia\r\n\
+c=IN IP4 192.168.123.251\r\n\
+t=0 0\r\n\
+a=X-nat:8\r\n\
+m=audio 33078 RTP/AVP 96\r\n\
+a=rtcp:52219 IN IP4 192.168.123.251\r\n\
+a=sendrecv\r\n\
+a=rtpmap:96 telephone-event/8000\r\n\
+a=fmtp:96 0-15\r\n\
+a=X-adapter:some value\r\n\
+a=ice-ufrag:67eb0181\r\n\
+a=ice-pwd:10d5735e\r\n\
+a=candidate:Sc0a800c5 1 UDP 1694498815 192.168.123.249 36931 typ srflx raddr 192.168.0.197 rport 36931\r\n\
+a=candidate:Hc0a800c5 1 UDP 2130706431 192.168.0.197 36931 typ host\r\n\
+a=candidate:Rc0a87bfb 1 UDP 16777215 192.168.123.251 33078 typ relay raddr 192.168.123.249 rport 49357\r\n\
+a=candidate:Sc0a800c5 2 UDP 1694498814 192.168.123.249 46005 typ srflx raddr 192.168.0.197 rport 46005\r\n\
+a=candidate:Hc0a800c5 2 UDP 2130706430 192.168.0.197 46005 typ host\r\n\
+a=candidate:Rc0a87bfb 2 UDP 16777214 192.168.123.251 52219 typ relay raddr 192.168.123.249 rport 48928\r\n\
+\r\n"
+
+
+#if 0
+
+#endif
+
+int write_data_to_sdcard(char* filename, char* buf, int wrlen)
+{
+    FILE* pFile;
+    int err = -1, ret=0;
+    pFile = fopen(filename, "w+");
+
+    ret = fwrite(buf, 1, wrlen, pFile);
+    fclose(pFile);
+    return ret;
+}
+
+int read_sip_inv_buff(char* filename, char* buf, int bufsize)
+{
+    FILE* pFile;
+    int err, ret;
+    pFile = fopen(filename, "rb");
+    err = fread(buf, 1, bufsize, pFile);
+    
+    fclose(pFile);
+}
+
+long get_file_size(const char *file_name) {
+    FILE *pFile = fopen(file_name, "r");
+    long fileSize;
+    if (!pFile) {
+    
+        printf("[server.c] open file failed. file_name=[%s]\n", file_name);
+        return 0;
+    }
+    fseek(pFile, 0, SEEK_END); // seek to end of file
+    fileSize = ftell(pFile);               // get current file pointer
+    fseek(pFile, 0, SEEK_SET);  // seek back to beginning of file
+    fclose(pFile);
+    
+    return fileSize;
+}
+
+#endif
+
+#if 0
+static void DumpHex(char *buff, int len)
+{
+    int i;
+    char strr[4096] = {0};
+    char bb[3];
+    
+    if (len > 32) {
+	len = 32;
+    }
+    for (i=0;i<len;i++) {
+	sprintf(bb, "%02x", buff[i]&0xff);
+	strcat(strr, bb);
+        if (i%16==15) {
+	    strcat(strr, "\n");
+        }
+    }
+    strcat(strr, "\n");
+    PJ_LOG(4, ("sock_bsd.c", "\n%s", strr));
+}
+#endif
 
 /*
  * Send data
@@ -653,13 +890,18 @@ PJ_DEF(pj_status_t) pj_sock_send(pj_sock_t sock,
 {
     PJ_CHECK_STACK();
     PJ_ASSERT_RETURN(len, PJ_EINVAL);
+    
+#ifdef MSG_NOSIGNAL
+    /* Suppress SIGPIPE. See https://trac.pjsip.org/repos/ticket/1538 */
+	flags |= MSG_NOSIGNAL;
+#endif
 
     *len = send(sock, (const char*)buf, *len, flags);
 
     if (*len < 0)
 	return PJ_RETURN_OS_ERROR(pj_get_native_netos_error());
     else
-	return PJ_SUCCESS;
+        return PJ_SUCCESS;
 }
 
 
@@ -700,7 +942,7 @@ PJ_DEF(pj_status_t) pj_sock_recv(pj_sock_t sock,
 
     *len = recv(sock, (char*)buf, *len, flags);
 
-    if (*len < 0) 
+    if (*len < 0)
 	return PJ_RETURN_OS_ERROR(pj_get_native_netos_error());
     else
 	return PJ_SUCCESS;
@@ -716,19 +958,27 @@ PJ_DEF(pj_status_t) pj_sock_recvfrom(pj_sock_t sock,
 				     pj_sockaddr_t *from,
 				     int *fromlen)
 {
+	//pj_uint16_t pkt_id;
+	pj_status_t status;
     PJ_CHECK_STACK();
     PJ_ASSERT_RETURN(buf && len, PJ_EINVAL);
-    PJ_ASSERT_RETURN(from && fromlen, (*len=-1, PJ_EINVAL));
 
     *len = recvfrom(sock, (char*)buf, *len, flags, 
-		    (struct sockaddr*)from, (socklen_t*)fromlen);
+		(struct sockaddr*)from, (socklen_t*)fromlen);
 
-    if (*len < 0) 
-	return PJ_RETURN_OS_ERROR(pj_get_native_netos_error());
+    if (*len < 0)
+		status = PJ_RETURN_OS_ERROR(pj_get_native_netos_error());
     else {
-	PJ_SOCKADDR_RESET_LEN(from);
-	return PJ_SUCCESS;
-    }
+        if (from) {
+            PJ_SOCKADDR_RESET_LEN(from);
+        }
+	status = PJ_SUCCESS;
+	}
+
+	//pkt_id = pj_ntohl(((pj_uint32_t*)(((pj_uint8_t *)buf) + 6))[0]);
+	//PJ_LOG(4, (THIS_FILE, "pkt_len=[%d], pkt_id=[%d], status=[%d]", *len, pkt_id, status));
+
+	return status;
 }
 
 /*

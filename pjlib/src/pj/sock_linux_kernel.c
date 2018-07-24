@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sock_linux_kernel.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -92,6 +92,8 @@ const pj_uint16_t PJ_SOL_IPV6	= SOL_IPV6;
 const pj_uint16_t PJ_SO_TYPE    = SO_TYPE;
 const pj_uint16_t PJ_SO_RCVBUF  = SO_RCVBUF;
 const pj_uint16_t PJ_SO_SNDBUF  = SO_SNDBUF;
+const pj_uint16_t PJ_SO_BROADCAST= SO_BROADCAST;
+const pj_uint16_t PJ_SO_KEEPALIVE= SO_KEEPALIVE;
 
 /*
  * Convert 16-bit value from network byte order to host byte order.

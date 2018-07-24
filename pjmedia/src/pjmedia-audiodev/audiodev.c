@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: audiodev.c 3611 2011-07-07 09:26:26Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -24,7 +24,8 @@
 #include <pj/pool.h>
 #include <pj/string.h>
 
-#define THIS_FILE   "audiodev.c"
+#define THIS_FILE "audiodev.c"
+
 
 #define DEFINE_CAP(name, info)	{name, info}
 
@@ -363,6 +364,10 @@ static void deinit_driver(unsigned drv_idx)
 /* API: Initialize the audio subsystem. */
 PJ_DEF(pj_status_t) pjmedia_aud_subsys_init(pj_pool_factory *pf)
 {
+#if 1
+	PJ_UNUSED_ARG(pf);
+	return PJ_SUCCESS;
+#else
     unsigned i;
     pj_status_t status;
 
@@ -420,6 +425,7 @@ PJ_DEF(pj_status_t) pjmedia_aud_subsys_init(pj_pool_factory *pf)
     }
 
     return aud_subsys.dev_cnt ? PJ_SUCCESS : status;
+#endif
 }
 
 /* API: register an audio device factory to the audio subsystem. */
@@ -607,8 +613,11 @@ PJ_DEF(pj_status_t) pjmedia_aud_dev_get_info(pjmedia_aud_dev_index id,
     unsigned index;
     pj_status_t status;
 
-    PJ_ASSERT_RETURN(info && id!=PJMEDIA_AUD_INVALID_DEV, PJ_EINVAL);
-    PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	PJ_ASSERT_RETURN(info && id!=PJMEDIA_AUD_INVALID_DEV, PJ_EINVAL);
+	//PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	// DEAN don't assertion
+	if (!aud_subsys.pf)
+		return PJMEDIA_EAUD_INIT;
 
     status = lookup_dev(id, &f, &index);
     if (status != PJ_SUCCESS)
@@ -625,8 +634,11 @@ PJ_DEF(pj_status_t) pjmedia_aud_dev_lookup( const char *drv_name,
     pjmedia_aud_dev_factory *f = NULL;
     unsigned drv_idx, dev_idx;
 
-    PJ_ASSERT_RETURN(drv_name && dev_name && id, PJ_EINVAL);
-    PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	PJ_ASSERT_RETURN(drv_name && dev_name && id, PJ_EINVAL);
+	//PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	// DEAN don't assertion
+	if (!aud_subsys.pf)
+		return PJMEDIA_EAUD_INIT;
 
     for (drv_idx=0; drv_idx<aud_subsys.drv_cnt; ++drv_idx) {
 	if (!pj_ansi_stricmp(drv_name, aud_subsys.drv[drv_idx].name)) {
@@ -636,7 +648,10 @@ PJ_DEF(pj_status_t) pjmedia_aud_dev_lookup( const char *drv_name,
     }
 
     if (!f)
-	return PJ_ENOTFOUND;
+	{
+		PJ_LOG(4, (THIS_FILE, "pjmedia_aud_dev_lookup() pjmedia_aud_dev_factory not found."));
+		return PJ_ENOTFOUND;
+	}
 
     for (dev_idx=0; dev_idx<aud_subsys.drv[drv_idx].dev_cnt; ++dev_idx) {
 	pjmedia_aud_dev_info info;
@@ -650,8 +665,11 @@ PJ_DEF(pj_status_t) pjmedia_aud_dev_lookup( const char *drv_name,
 	    break;
     }
 
-    if (dev_idx==aud_subsys.drv[drv_idx].dev_cnt)
-	return PJ_ENOTFOUND;
+	if (dev_idx==aud_subsys.drv[drv_idx].dev_cnt)
+	{
+		PJ_LOG(4, (THIS_FILE, "pjmedia_aud_dev_lookup() aud_subsys.drv not found."));
+		return PJ_ENOTFOUND;
+	}
 
     *id = dev_idx;
     make_global_index(drv_idx, id);
@@ -670,7 +688,10 @@ PJ_DEF(pj_status_t) pjmedia_aud_dev_default_param(pjmedia_aud_dev_index id,
     pj_status_t status;
 
     PJ_ASSERT_RETURN(param && id!=PJMEDIA_AUD_INVALID_DEV, PJ_EINVAL);
-    PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+    //PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	// DEAN don't assertion
+	if (!aud_subsys.pf)
+		return PJMEDIA_EAUD_INIT;
 
     status = lookup_dev(id, &f, &index);
     if (status != PJ_SUCCESS)
@@ -698,8 +719,11 @@ PJ_DEF(pj_status_t) pjmedia_aud_stream_create(const pjmedia_aud_param *prm,
     pjmedia_aud_param param;
     pj_status_t status;
 
-    PJ_ASSERT_RETURN(prm && prm->dir && p_aud_strm, PJ_EINVAL);
-    PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	PJ_ASSERT_RETURN(prm && prm->dir && p_aud_strm, PJ_EINVAL);
+	//PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	// DEAN don't assertion
+	if (!aud_subsys.pf)
+		return PJMEDIA_EAUD_INIT;
     PJ_ASSERT_RETURN(prm->dir==PJMEDIA_DIR_CAPTURE ||
 		     prm->dir==PJMEDIA_DIR_PLAYBACK ||
 		     prm->dir==PJMEDIA_DIR_CAPTURE_PLAYBACK,
@@ -762,8 +786,11 @@ PJ_DEF(pj_status_t) pjmedia_aud_stream_get_param(pjmedia_aud_stream *strm,
 {
     pj_status_t status;
 
-    PJ_ASSERT_RETURN(strm && param, PJ_EINVAL);
-    PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	PJ_ASSERT_RETURN(strm && param, PJ_EINVAL);
+	//PJ_ASSERT_RETURN(aud_subsys.pf, PJMEDIA_EAUD_INIT);
+	// DEAN don't assertion
+	if (!aud_subsys.pf)
+		return PJMEDIA_EAUD_INIT;
 
     status = strm->op->get_param(strm, param);
     if (status != PJ_SUCCESS)

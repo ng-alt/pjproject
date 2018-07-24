@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: xml.c 3958 2012-02-25 00:55:37Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -30,8 +30,7 @@
 
 static void on_syntax_error(struct pj_scanner *scanner)
 {
-    PJ_UNUSED_ARG(scanner);
-    PJ_THROW(EX_SYNTAX_ERROR);
+    PJ_THROW(scanner->inst_id, EX_SYNTAX_ERROR);
 }
 
 static pj_xml_node *alloc_node( pj_pool_t *pool )
@@ -100,13 +99,13 @@ static pj_xml_node *xml_parse_node( pj_pool_t *pool, pj_scanner *scanner)
     pj_scan_get_char(scanner);
 
     /* Get node name. */
-    pj_scan_get_until_chr( scanner, " />\t", &node->name);
+    pj_scan_get_until_chr( scanner, " />\t\r\n", &node->name);
 
     /* Get attributes. */
     while (*scanner->curptr != '>' && *scanner->curptr != '/') {
 	pj_xml_attr *attr = alloc_attr(pool);
 	
-	pj_scan_get_until_chr( scanner, "=> \t", &attr->name);
+	pj_scan_get_until_chr( scanner, "=> \t\r\n", &attr->name);
 	if (*scanner->curptr == '=') {
 	    pj_scan_get_char( scanner );
             pj_scan_get_quotes(scanner, "\"'", "\"'", 2, &attr->value);
@@ -157,7 +156,7 @@ static pj_xml_node *xml_parse_node( pj_pool_t *pool, pj_scanner *scanner)
     return node;
 }
 
-PJ_DEF(pj_xml_node*) pj_xml_parse( pj_pool_t *pool, char *msg, pj_size_t len)
+PJ_DEF(pj_xml_node*) pj_xml_parse( int inst_id, pj_pool_t *pool, char *msg, pj_size_t len)
 {
     pj_xml_node *node = NULL;
     pj_scanner scanner;
@@ -166,17 +165,17 @@ PJ_DEF(pj_xml_node*) pj_xml_parse( pj_pool_t *pool, char *msg, pj_size_t len)
     if (!msg || !len || !pool)
 	return NULL;
 
-    pj_scan_init( &scanner, msg, len, 
+    pj_scan_init( inst_id, &scanner, msg, len, 
 		  PJ_SCAN_AUTOSKIP_WS|PJ_SCAN_AUTOSKIP_NEWLINE, 
 		  &on_syntax_error);
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	node =  xml_parse_node(pool, &scanner);
     }
     PJ_CATCH_ANY {
 	PJ_LOG(4,(THIS_FILE, "Syntax error parsing XML in line %d column %d",
 		  scanner.line, pj_scan_get_col(&scanner)));
     }
-    PJ_END;
+    PJ_END(inst_id);
     pj_scan_fini( &scanner );
     return node;
 }

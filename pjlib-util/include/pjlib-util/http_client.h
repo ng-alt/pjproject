@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: http_client.h 3810 2011-10-11 04:37:37Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -384,18 +384,21 @@ PJ_DECL(pj_status_t) pj_http_headers_add_elmt2(pj_http_headers *headers,
 /**
  * Parse a http URL into its components.
  *
+ * @param inst_id       The intance id of pjusa.
  * @param url	        The URL to be parsed.
  * @param hurl	        Pointer to receive the parsed result.
  *
  * @return	        PJ_SUCCESS if the operation has been successful,
  *		        or the appropriate error code on failure.
  */
-PJ_DECL(pj_status_t) pj_http_req_parse_url(const pj_str_t *url, 
+PJ_DECL(pj_status_t) pj_http_req_parse_url(int inst_id, 
+										   const pj_str_t *url, 
                                            pj_http_url *hurl);
 
 /**
  * Create the HTTP request.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool		Pool to use. HTTP request will use the pool's factory
  *                      to allocate its own memory pool.
  * @param url		HTTP URL request.
@@ -410,7 +413,8 @@ PJ_DECL(pj_status_t) pj_http_req_parse_url(const pj_str_t *url,
  * @return		PJ_SUCCESS if the operation has been successful,
  *			or the appropriate error code on failure.
  */
-PJ_DECL(pj_status_t) pj_http_req_create(pj_pool_t *pool,
+PJ_DECL(pj_status_t) pj_http_req_create(int inst_id,
+										pj_pool_t *pool,
                                         const pj_str_t *url,
 					pj_timer_heap_t *timer,
 					pj_ioqueue_t *ioqueue,

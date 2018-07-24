@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_core_linux_kernel.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -93,7 +93,8 @@ struct pj_mutex_t
     struct semaphore sem;
     pj_bool_t	     recursive;
     pj_thread_t	    *owner;
-    int		     own_count;
+	int		     own_count;
+	int                 inst_id;
 };
 
 struct pj_sem_t
@@ -235,7 +236,12 @@ PJ_DEF(pj_status_t) pj_init(void)
 
 PJ_DEF(pj_uint32_t) pj_getpid(void)
 {
-    return 1;
+	return 1;
+}
+
+PJ_DEF(pj_uint32_t) pj_gettid(void)
+{
+	return 1;
 }
 
 PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
@@ -260,7 +266,7 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
 	//  thread may be reused while the pool used for the thread descriptor
 	//  has been deleted by application.
 	//*thread_ptr = (pj_thread_t*)pj_thread_local_get (thread_tls_id);
-        //return PJ_SUCCESS;
+        return PJ_SUCCESS;
     }
 
     /* Initialize and set the thread entry. */
@@ -634,6 +640,12 @@ PJ_DEF(pj_bool_t) pj_mutex_is_locked(pj_mutex_t *mutex)
 }
 #endif	/* PJ_DEBUG */
 
+PJ_DEF(int) pj_get_mutex_inst_id(pj_mutex_t *mutex)
+{
+	PJ_ASSERT_RETURN(mutex, -1);
+	return mutex->inst_id;
+}
+
 
 #if defined(PJ_HAS_SEMAPHORE) && PJ_HAS_SEMAPHORE != 0
 
@@ -674,6 +686,14 @@ PJ_DEF(pj_status_t) pj_sem_trywait(pj_sem_t *sem)
     } else {
 	return PJ_SUCCESS;
     }
+}
+
+/*
+ * pj_sem_trywait2()
+ */
+PJ_DEF(pj_status_t) pj_sem_trywait2(pj_sem_t *sem)
+{
+	return pj_sem_trywait(sem);
 }
 
 PJ_DEF(pj_status_t) pj_sem_post(pj_sem_t *sem)

@@ -1,4 +1,4 @@
-# $Id$
+# $Id: 400_inv_answered_with_less_media.py 3195 2010-06-03 03:06:03Z nanang $
 import inc_sip as sip
 import inc_sdp as sdp
 

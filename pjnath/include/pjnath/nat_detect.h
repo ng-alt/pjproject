@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: nat_detect.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -154,7 +154,8 @@ typedef struct pj_stun_nat_detect_result
  * Type of callback to be called when the NAT detection function has
  * completed.
  */
-typedef void pj_stun_nat_detect_cb(void *user_data,
+typedef void pj_stun_nat_detect_cb(int inst_id,
+				   void *local_addr, void *mapped_addr,
 				   const pj_stun_nat_detect_result *res);
 
 
@@ -167,6 +168,12 @@ typedef void pj_stun_nat_detect_cb(void *user_data,
  */
 PJ_DECL(const char*) pj_stun_get_nat_name(pj_stun_nat_type type);
 
+/*
+ * Find out which interface is used to send to the server.
+ */
+PJ_DECL(pj_status_t) get_local_interface(const pj_sockaddr_in *server,
+										pj_in_addr *local_addr);
+
 
 /**
  * Perform NAT classification function according to the procedures
@@ -175,6 +182,7 @@ PJ_DECL(const char*) pj_stun_get_nat_name(pj_stun_nat_type type);
  * asynchronously. Application can register a callback to be notified
  * when such detection has completed.
  *
+ * @param inst_id 	The instance id of pjsua.
  * @param server	STUN server address.
  * @param stun_cfg	A structure containing various STUN configurations,
  *			such as the ioqueue and timer heap instance used
@@ -190,7 +198,8 @@ PJ_DECL(const char*) pj_stun_get_nat_name(pj_stun_nat_type type);
  *			values, it means that an error has occured and
  *			the procedure did not start.
  */
-PJ_DECL(pj_status_t) pj_stun_detect_nat_type(const pj_sockaddr_in *server,
+PJ_DECL(pj_status_t) pj_stun_detect_nat_type(int inst_id,
+						 const pj_sockaddr_in *server,
 					     pj_stun_config *stun_cfg,
 					     void *user_data,
 					     pj_stun_nat_detect_cb *cb);
@@ -199,7 +208,7 @@ PJ_DECL(pj_status_t) pj_stun_detect_nat_type(const pj_sockaddr_in *server,
 /**
  * @}
  */
-
+PJ_DECL(pj_status_t) get_local_interface(const pj_sockaddr_in *server, pj_in_addr *local_addr);
 
 PJ_END_DECL
 

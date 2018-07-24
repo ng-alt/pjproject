@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: publish.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -169,6 +169,7 @@ PJ_DECL(pj_pool_t*) pjsip_publishc_get_pool(pjsip_publishc *pubc);
  * Initialize client publication structure with various information needed to
  * perform the publication.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pubc		The client publication structure.
  * @param event		The Event identification (e.g. "presence").
  * @param target_uri	The URI of the presentity which the which the status
@@ -184,7 +185,8 @@ PJ_DECL(pj_pool_t*) pjsip_publishc_get_pool(pjsip_publishc *pubc);
  *
  * @return		PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pjsip_publishc_init(pjsip_publishc *pubc,
+PJ_DECL(pj_status_t) pjsip_publishc_init(int inst_id,
+					 pjsip_publishc *pubc,
 					 const pj_str_t *event,
 					 const pj_str_t *target_uri,
 					 const pj_str_t *from_uri,

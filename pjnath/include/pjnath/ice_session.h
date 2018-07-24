@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ice_session.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -26,6 +26,7 @@
  */
 #include <pjnath/types.h>
 #include <pjnath/stun_session.h>
+#include <pjnath/tcp_session.h>
 #include <pjnath/errno.h>
 #include <pj/sock.h>
 #include <pj/timer.h>
@@ -129,6 +130,9 @@ typedef struct pj_ice_sess_checklist pj_ice_sess_checklist;
 /**
  * This enumeration describes the type of an ICE candidate.
  */
+//charles debug
+#pragma pack(1)
+//charles debug
 typedef enum pj_ice_cand_type
 {
     /**
@@ -154,9 +158,54 @@ typedef enum pj_ice_cand_type
      * ICE relayed candidate, which represents the address allocated in
      * TURN server.
      */
-    PJ_ICE_CAND_TYPE_RELAYED
+    PJ_ICE_CAND_TYPE_RELAYED,
+
+    /**
+     * ICE host candidate. A host candidate represents the actual local
+     * transport address in the host.
+     */
+    PJ_ICE_CAND_TYPE_HOST_TCP,
+
+    /**
+     * ICE server reflexive candidate, which represents the public mapped
+     * address of the local address, and is obtained by sending STUN
+     * Binding request from the host candidate to a STUN server.
+     */
+    PJ_ICE_CAND_TYPE_SRFLX_TCP,
+
+    /**
+     * ICE relayed candidate, which represents the address allocated in
+     * TURN server by using TCP.
+     */
+    PJ_ICE_CAND_TYPE_RELAYED_TCP,
 
 } pj_ice_cand_type;
+
+/**
+ * This enumeration describes the tcp type of an ICE candidate.
+ */
+typedef enum pj_ice_cand_tcp_type
+{
+    /**
+     * ICE candidate tcp type none, it is for active connection from local.
+     */
+    PJ_ICE_CAND_TCP_TYPE_NONE,
+    /**
+     * ICE candidate tcp type active, it is for active connection from local.
+     */
+    PJ_ICE_CAND_TCP_TYPE_ACTIVE,
+
+    /**
+     * ICE candidate tcp type passive, it is for passive connection from remote.
+     */
+    PJ_ICE_CAND_TCP_TYPE_PASSIVE,
+
+    /**
+     * ICE candidate simultaneous-open, we don't use this present.
+     */
+    PJ_ICE_CAND_TCP_TYPE_SO
+
+} pj_ice_cand_tcp_type;
 
 
 /** Forward declaration for pj_ice_sess */
@@ -304,6 +353,21 @@ typedef struct pj_ice_sess_cand
      */
     pj_sockaddr		 rel_addr;
 
+	/**
+	 * Active : 
+	 * Passive : 
+	 */
+	pj_ice_cand_tcp_type tcp_type;
+
+	pj_bool_t        use_user_port;
+
+	int              collect_consume_time;
+
+	pj_time_val      adding_time;
+	pj_time_val      ending_time;
+
+	pj_bool_t		 enabled;
+
 } pj_ice_sess_cand;
 
 
@@ -398,6 +462,21 @@ struct pj_ice_sess_check
      * STUN transaction.
      */
     pj_status_t		 err_code;
+
+    /**
+     * When the tcp_type of both lcand and rcand are PJ_ICE_CAND_TCP_TYPE_ACTIVE, 
+	 * local_path is true.
+     */
+	pj_bool_t		 local_path;
+
+	// DEAN, just for upnp tcp
+	int              tcp_sess_idx;
+
+	// DEAN, valid when candidate type is PJ_ICE_CAND_TYPE_HOST_TCP or PJ_ICE_CAND_TYPE_SRFLX_TCP
+	pj_bool_t        tcp_sess_ready;
+
+	// Store transmit count
+	int transmit_count;
 };
 
 
@@ -480,14 +559,38 @@ typedef struct pj_ice_sess_cb
      * @param transport_id  Transport ID.
      * @param pkt	    The STUN packet.
      * @param size	    The size of the packet.
-     * @param dst_addr	    Packet destination address.
-     * @param dst_addr_len  Length of destination address.
+	 * @param dst_addr	    Packet destination address.
+	 * @param dst_addr_len  Length of destination address.
+	 * @param tcp_sess_idx  for tcp is tcp session index.
      */
     pj_status_t (*on_tx_pkt)(pj_ice_sess *ice, unsigned comp_id, 
 			     unsigned transport_id,
 			     const void *pkt, pj_size_t size,
 			     const pj_sockaddr_t *dst_addr,
-			     unsigned dst_addr_len);
+			     unsigned dst_addr_len,
+				 int tcp_sess_idx);
+
+    /**
+     * A mandatory callback which will be called by the ICE session when
+     * it needs to send outgoing STUN packet. 
+     *
+     * @param ice	    The ICE session.
+     * @param comp_id	    ICE component ID.
+     * @param transport_id  Transport ID.
+     * @param pkt	    The STUN packet.
+     * @param size	    The size of the packet.
+	 * @param dst_addr	    Packet destination address.
+	 * @param dst_addr_len  Length of destination address.
+	 * @param user_data  for tcp is tcp session.
+	 * @param tcp_sess_idx  for tcp is tcp session index.
+     */
+    pj_status_t (*on_tx_pkt2)(pj_ice_sess *ice, unsigned comp_id, 
+			     unsigned transport_id,
+			     const void *pkt, pj_size_t size,
+			     const pj_sockaddr_t *dst_addr,
+			     unsigned dst_addr_len,
+				 void *user_data,
+				 int tcp_sess_idx);
 
     /**
      * A mandatory callback which will be called by the ICE session when
@@ -612,13 +715,14 @@ struct pj_ice_sess
 
     pj_pool_t		*pool;			    /**< Pool instance.	    */
     void		*user_data;		    /**< App. data.	    */
-    pj_mutex_t		*mutex;			    /**< Mutex.		    */
+    pj_grp_lock_t	*grp_lock;		    /**< Group lock	    */
     pj_ice_sess_role	 role;			    /**< ICE role.	    */
     pj_ice_sess_options	 opt;			    /**< Options	    */
     pj_timestamp	 tie_breaker;		    /**< Tie breaker value  */
     pj_uint8_t		*prefs;			    /**< Type preference.   */
     pj_bool_t		 is_nominating;		    /**< Nominating stage   */
     pj_bool_t		 is_complete;		    /**< Complete?	    */
+    pj_bool_t		 is_destroying;		    /**< Destroy is called  */
     pj_status_t		 ice_status;		    /**< Error status.	    */
     pj_timer_entry	 timer;			    /**< ICE timer.	    */
     pj_ice_sess_cb	 cb;			    /**< Callback.	    */
@@ -647,13 +751,16 @@ struct pj_ice_sess
     pj_ice_sess_cand	 rcand[PJ_ICE_MAX_CAND];    /**< Array of cand.	    */
 
     /** Array of transport datas */
-    pj_ice_msg_data	 tp_data[4];
+    pj_ice_msg_data	 tp_data[5];
 
     /* List of eearly checks */
-    pj_ice_rx_check	 early_check;		    /**< Early checks.	    */
+	pj_ice_rx_check	 early_check;		    /**< Early checks.	    */
 
-    /* Checklist */
-    pj_ice_sess_checklist clist;		    /**< Active checklist   */
+	/* Checklist */
+	pj_ice_sess_checklist clist;		    /**< Active checklist   */
+
+	/* Cached Checklist DEAN*/
+	pj_ice_sess_checklist cached_clist;		/**< Cached checklist   */
     
     /* Valid list */
     pj_ice_sess_checklist valid_list;		    /**< Valid list.	    */
@@ -662,10 +769,16 @@ struct pj_ice_sess
     union {
     	char txt[128];
 	char errmsg[PJ_ERR_MSG_SIZE];
-    } tmp;
+    } tmp;  
+
+	pj_bool_t partial_destroy;
+
+	/* tunnel timeout value in second */
+	int tnl_timeout_msec;
 };
-
-
+//charles debug
+#pragma pack()
+//charles debug
 /**
  * This is a utility function to retrieve the string name for the
  * particular candidate type.
@@ -729,6 +842,8 @@ PJ_DECL(void) pj_ice_sess_options_default(pj_ice_sess_options *opt);
  *			the value is NULL, a random string will be 
  *			generated.
  * @param local_passwd	Optional string to be used as local password.
+ * @param grp_lock	Optional group lock to be used by this session.
+ * 			If NULL, the session will create one itself.
  * @param p_ice		Pointer to receive the ICE session instance.
  *
  * @return		PJ_SUCCESS if ICE session is created successfully.
@@ -740,7 +855,9 @@ PJ_DECL(pj_status_t) pj_ice_sess_create(pj_stun_config *stun_cfg,
 				        const pj_ice_sess_cb *cb,
 				        const pj_str_t *local_ufrag,
 				        const pj_str_t *local_passwd,
-				        pj_ice_sess **p_ice);
+				        pj_grp_lock_t *grp_lock,
+						pj_ice_sess **p_ice,
+						int tnl_timeout_msec);
 
 /**
  * Get the value of various options of the ICE session.
@@ -815,9 +932,12 @@ PJ_DECL(pj_status_t) pj_ice_sess_change_role(pj_ice_sess *ice,
  * @return		PJ_SUCCESS on success, or the appropriate error code.
  */
 PJ_DECL(pj_status_t) pj_ice_sess_set_prefs(pj_ice_sess *ice,
-					   const pj_uint8_t prefs[4]);
+					   const pj_uint8_t prefs[]);
 
-
+PJ_DECL(pj_uint32_t) CALC_CAND_PRIO(pj_ice_sess *ice,
+								   pj_ice_cand_type type,
+								   pj_uint32_t local_pref,
+								   pj_uint32_t comp_id);
 
 /**
  * Add a candidate to this ICE session. Application must add candidates for
@@ -837,6 +957,10 @@ PJ_DECL(pj_status_t) pj_ice_sess_set_prefs(pj_ice_sess *ice,
  * @param rel_addr	Optional related address.
  * @param addr_len	Length of addresses.
  * @param p_cand_id	Optional pointer to receive the candidate ID.
+ * @param tcp_type	the candidate's tcp type.
+ * @param adding_time	the timestamp of candidate being added.
+ * @param ending_time	the timestamp of candidate status being success.
+ * @param enabled the candidate is valid or not.
  *
  * @return		PJ_SUCCESS if candidate is successfully added.
  */
@@ -850,7 +974,11 @@ PJ_DECL(pj_status_t) pj_ice_sess_add_cand(pj_ice_sess *ice,
 					  const pj_sockaddr_t *base_addr,
 					  const pj_sockaddr_t *rel_addr,
 					  int addr_len,
-					  unsigned *p_cand_id);
+					  unsigned *p_cand_id,
+					  pj_ice_cand_tcp_type tcp_type,
+					  pj_time_val adding_time,
+					  pj_time_val ending_time,
+					  pj_bool_t enabled);
 
 /**
  * Find default candidate for the specified component ID, using this
@@ -869,6 +997,14 @@ PJ_DECL(pj_status_t) pj_ice_sess_add_cand(pj_ice_sess *ice,
 PJ_DECL(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
 						   unsigned comp_id,
 						   int *p_cand_id);
+
+PJ_DECL(pj_timestamp) CALC_CHECK_PRIO(const pj_ice_sess *ice, 
+									const pj_ice_sess_cand *lcand,
+									const pj_ice_sess_cand *rcand);
+
+PJ_DECL(const char *)dump_check(char *buffer, unsigned bufsize,
+							   const pj_ice_sess_checklist *clist,
+							   const pj_ice_sess_check *check);
 
 /**
  * Pair the local and remote candidates to create check list. Application
@@ -896,7 +1032,15 @@ pj_ice_sess_create_check_list(pj_ice_sess *ice,
 			      const pj_str_t *rem_ufrag,
 			      const pj_str_t *rem_passwd,
 			      unsigned rem_cand_cnt,
-			      const pj_ice_sess_cand rem_cand[]);
+				  const pj_ice_sess_cand rem_cand[],
+				  int use_upnp_flag);
+
+// 2013-10-17 DEAN
+PJ_DECL(pj_status_t) pj_ice_sess_create_cached_check_list(
+	pj_ice_sess *ice,
+	const pj_str_t *rem_ufrag,
+	const pj_str_t *rem_passwd,
+	pj_ice_sess_check *cached_check);
 
 /**
  * Start ICE periodic check. This function will return immediately, and
@@ -908,6 +1052,8 @@ pj_ice_sess_create_check_list(pj_ice_sess *ice,
  * @return		PJ_SUCCESS or the appropriate error code.
  */
 PJ_DECL(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice);
+
+PJ_DECL(pj_status_t) pj_ice_sess_start_check2(pj_ice_sess *ice, pj_bool_t check_cached_list);
 
 
 /**
@@ -931,6 +1077,15 @@ PJ_DECL(pj_status_t) pj_ice_sess_send_data(pj_ice_sess *ice,
 					   unsigned comp_id,
 					   const void *data,
 					   pj_size_t data_len);
+
+PJ_DECL(pj_status_t) pj_ice_sess_on_rx_pkt2(pj_ice_sess *ice,
+										  unsigned comp_id,
+										  unsigned transport_id,
+										  void *pkt,
+										  pj_size_t pkt_size,
+										  const pj_sockaddr_t *src_addr,
+										  int src_addr_len,
+										  pj_stun_session *stun_sess) ;
 
 /**
  * Report the arrival of packet to the ICE session. Since ICE session
@@ -959,11 +1114,7 @@ PJ_DECL(pj_status_t) pj_ice_sess_on_rx_pkt(pj_ice_sess *ice,
 					   const pj_sockaddr_t *src_addr,
 					   int src_addr_len);
 
-
-
-/**
- * @}
- */
+PJ_DECL(pj_bool_t) pj_ice_sess_local_path_selected(pj_ice_sess *ice) ;
 
 
 PJ_END_DECL

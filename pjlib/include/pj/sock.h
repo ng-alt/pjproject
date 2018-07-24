@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sock.h 3741 2011-08-30 01:45:07Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -304,6 +304,10 @@ extern const pj_uint16_t PJ_SO_NOSIGPIPE;
  */
 extern const pj_uint16_t PJ_SO_PRIORITY;
 
+/** Set boardcast mode.
+ */
+extern const pj_uint16_t PJ_SO_BROADCAST;
+
 /** IP multicast interface. @see pj_IP_MULTICAST_IF() */
 extern const pj_uint16_t PJ_IP_MULTICAST_IF;
  
@@ -318,6 +322,21 @@ extern const pj_uint16_t PJ_IP_ADD_MEMBERSHIP;
 
 /** Drop an IP group membership. @see pj_IP_DROP_MEMBERSHIP() */
 extern const pj_uint16_t PJ_IP_DROP_MEMBERSHIP;
+
+/** TCP keep-alive option. @see pj_SO_KEEPALIVE() */
+extern const pj_uint16_t PJ_SO_KEEPALIVE;
+
+/** The time for triggering to send keep-alive packet. @see pj_TCP_KEEPALIVE() */
+extern const pj_uint16_t PJ_TCP_KEEPALIVE;
+
+/** The time for triggering to send keep-alive packet. @see pj_TCP_KEEPIDLE() */
+extern const pj_uint16_t PJ_TCP_KEEPIDLE;
+
+/** TCP Keep Alive interval. @see pj_TCP_KEEPINTVL() */
+extern const pj_uint16_t PJ_TCP_KEEPINTVL;
+
+/** TCP Keep Alive packet sending count. @see pj_TCP_KEEPCNT() */
+extern const pj_uint16_t PJ_TCP_KEEPCNT;
 
 
 #if defined(PJ_DLL)
@@ -340,7 +359,10 @@ extern const pj_uint16_t PJ_IP_DROP_MEMBERSHIP;
     PJ_DECL(pj_uint16_t) pj_SO_NOSIGPIPE(void);
 
     /** Get #PJ_SO_PRIORITY constant */
-    PJ_DECL(pj_uint16_t) pj_SO_PRIORITY(void);
+	PJ_DECL(pj_uint16_t) pj_SO_PRIORITY(void);
+
+	/** Get #PJ_SO_BROADCAST constant */
+	PJ_DECL(pj_uint16_t) pj_PJ_SO_BROADCAST(void);
 
     /** Get #PJ_IP_MULTICAST_IF constant */
     PJ_DECL(pj_uint16_t) pj_IP_MULTICAST_IF(void);
@@ -349,13 +371,25 @@ extern const pj_uint16_t PJ_IP_DROP_MEMBERSHIP;
     PJ_DECL(pj_uint16_t) pj_IP_MULTICAST_TTL(void);
 
     /** Get #PJ_IP_MULTICAST_LOOP constant */
-    PJ_DECL(pj_uint16_t) pj_IP_MULTICAST_LOOP(void);
+	PJ_DECL(pj_uint16_t) pj_IP_MULTICAST_LOOP(void);
 
-    /** Get #PJ_IP_ADD_MEMBERSHIP constant */
-    PJ_DECL(pj_uint16_t) pj_IP_ADD_MEMBERSHIP(void);
+	/** Get #PJ_IP_ADD_MEMBERSHIP constant */
+	PJ_DECL(pj_uint16_t) pj_IP_ADD_MEMBERSHIP(void);
 
-    /** Get #PJ_IP_DROP_MEMBERSHIP constant */
-    PJ_DECL(pj_uint16_t) pj_IP_DROP_MEMBERSHIP(void);
+	/** Get #PJ_SO_KEEPALIVE constant */
+	PJ_DECL(pj_uint16_t) pj_SO_KEEPALIVE(void);
+
+	/** Get #PJ_TCP_KEEPALIVE constant */
+	PJ_DECL(pj_uint16_t) pj_TCP_KEEPALIVE(void);
+
+	/** Get #PJ_TCP_KEEPIDLE constant */
+	PJ_DECL(pj_uint16_t) pj_TCP_KEEPIDLE(void);
+
+	/** Get #PJ_TCP_KEEPINTVL constant */
+	PJ_DECL(pj_uint16_t) pj_TCP_KEEPINTVL(void);
+
+	/** Get #PJ_TCP_KEEPCNT constant */
+	PJ_DECL(pj_uint16_t) pj_TCP_KEEPCNT(void);
 #else
     /** Get #PJ_SO_TYPE constant */
 #   define pj_SO_TYPE()	    PJ_SO_TYPE
@@ -378,6 +412,9 @@ extern const pj_uint16_t PJ_IP_DROP_MEMBERSHIP;
     /** Get #PJ_SO_PRIORITY constant */
 #   define pj_SO_PRIORITY() PJ_SO_PRIORITY
 
+    /** Get #PJ_SO_BROADCAST constant */
+#   define pj_SO_BROADCAST() PJ_SO_BROADCAST
+
     /** Get #PJ_IP_MULTICAST_IF constant */
 #   define pj_IP_MULTICAST_IF()    PJ_IP_MULTICAST_IF
 
@@ -390,8 +427,23 @@ extern const pj_uint16_t PJ_IP_DROP_MEMBERSHIP;
     /** Get #PJ_IP_ADD_MEMBERSHIP constant */
 #   define pj_IP_ADD_MEMBERSHIP()  PJ_IP_ADD_MEMBERSHIP
 
-    /** Get #PJ_IP_DROP_MEMBERSHIP constant */
+/** Get #PJ_IP_DROP_MEMBERSHIP constant */
 #   define pj_IP_DROP_MEMBERSHIP() PJ_IP_DROP_MEMBERSHIP
+
+/** Get #PJ_SO_KEEPALIVE constant */
+#   define pj_SO_KEEPALIVE() PJ_SO_KEEPALIVE
+
+/** Get #PJ_TCP_KEEPALIVE constant */
+#   define pj_TCP_KEEPALIVE() PJ_TCP_KEEPALIVE
+
+/** Get #PJ_TCP_KEEPIDLE constant */
+#   define pj_TCP_KEEPIDLE() PJ_TCP_KEEPIDLE
+
+/** Get #PJ_TCP_KEEPINTVL constant */
+#   define pj_TCP_KEEPINTVL() PJ_TCP_KEEPINTVL
+
+/** Get #PJ_TCP_KEEPCNT constant */
+#   define pj_TCP_KEEPCNT() PJ_TCP_KEEPCNT
 #endif
 
 
@@ -1381,6 +1433,21 @@ PJ_DECL(pj_status_t) pj_sock_sendto(pj_sock_t sockfd,
 PJ_DECL(pj_status_t) pj_sock_shutdown( pj_sock_t sockfd,
 				       int how);
 #endif
+
+/**
+ * Set TCP socket SO_KEEPALIVE option and tune the idle time to custom value.
+ *
+ * @param sock	The socket descriptor.
+ * @param tcp_timeout		The time (in seconds) the connection needs to remain 
+ *          idle before TCP starts sending keepalive probes, if the socket option 
+ *          SO_KEEPALIVE has been set on this socket. This option should not be 
+ *          used in code intended to be portable.
+ *
+ * @return		Zero on success.
+ */
+PJ_DECL(pj_status_t) pj_sock_set_tcp_timeout(pj_sock_t *sock, 
+											int tcp_timeout  //in milliseconds.
+											);
 
 /**
  * @}

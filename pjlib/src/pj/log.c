@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: log.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -28,14 +28,16 @@
 #if 0
 PJ_DEF_DATA(int) pj_log_max_level = PJ_LOG_MAX_LEVEL;
 #else
-static int pj_log_max_level = PJ_LOG_MAX_LEVEL;
+static int pj_log_max_level[PJSUA_MAX_INSTANCES];
+static int log_max_level_initialized;
 #endif
 
 #if PJ_HAS_THREADS
-static long thread_suspended_tls_id = -1;
+static long thread_suspended_tls_id[PJSUA_MAX_INSTANCES];
+static int thread_tls_id_initialized;
 #endif
 
-static pj_log_func *log_writer = &pj_log_write;
+static pj_log_func *log_writer = NULL;//&pj_log_write;
 static unsigned log_decor = PJ_LOG_HAS_TIME | PJ_LOG_HAS_MICRO_SEC |
 			    PJ_LOG_HAS_SENDER | PJ_LOG_HAS_NEWLINE |
 			    PJ_LOG_HAS_SPACE
@@ -71,22 +73,55 @@ static pj_color_t PJ_LOG_COLOR_77 = PJ_TERM_COLOR_R |
 static char log_buffer[PJ_LOG_MAX_SIZE];
 #endif
 
-#if PJ_HAS_THREADS
-static void logging_shutdown(void)
+static void log_max_level_initialize()
 {
-    if (thread_suspended_tls_id != -1) {
-	pj_thread_local_free(thread_suspended_tls_id);
-	thread_suspended_tls_id = -1;
+	int i;
+	if(log_max_level_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(pj_log_max_level); i++)
+	{
+		pj_log_max_level[i] = PJ_LOG_MAX_LEVEL;
+	}
+
+	log_max_level_initialized = 1;
+}
+
+#if PJ_HAS_THREADS
+
+static void thread_tls_id_initialize()
+{
+	int i;
+	if(thread_tls_id_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(thread_suspended_tls_id); i++)
+	{
+		thread_suspended_tls_id[i] = -1;
+	}
+
+	thread_tls_id_initialized = 1;
+}
+
+static void logging_shutdown(int inst_id)
+{
+    if (thread_suspended_tls_id[inst_id] != -1) {
+		pj_thread_local_free(thread_suspended_tls_id[inst_id]);
+		thread_suspended_tls_id[inst_id] = -1;
     }
 }
 #endif
 
-pj_status_t pj_log_init(void)
+pj_status_t pj_log_init(int inst_id)
 {
+	log_max_level_initialize();
+
 #if PJ_HAS_THREADS
-    if (thread_suspended_tls_id == -1) {
-	pj_thread_local_alloc(&thread_suspended_tls_id);
-	pj_atexit(&logging_shutdown);
+	thread_tls_id_initialize();
+
+    if (thread_suspended_tls_id[inst_id] == -1) {
+	pj_thread_local_alloc(&thread_suspended_tls_id[inst_id]);
+	pj_atexit(inst_id, &logging_shutdown);
     }
 #endif
     return PJ_SUCCESS;
@@ -152,15 +187,15 @@ PJ_DEF(pj_color_t) pj_log_get_color(int level)
     }
 }
 
-PJ_DEF(void) pj_log_set_level(int level)
+PJ_DEF(void) pj_log_set_level(int inst_id, int level)
 {
-    pj_log_max_level = level;
+    pj_log_max_level[inst_id] = level;
 }
 
 #if 1
-PJ_DEF(int) pj_log_get_level(void)
+PJ_DEF(int) pj_log_get_level(int inst_id)
 {
-    return pj_log_max_level;
+    return pj_log_max_level[inst_id];
 }
 #endif
 
@@ -180,32 +215,32 @@ PJ_DEF(pj_log_func*) pj_log_get_log_func(void)
  * happen e.g. when log function is called before PJLIB is fully initialized
  * or after PJLIB is shutdown.
  */
-static void suspend_logging(int *saved_level)
+static void suspend_logging(int inst_id, int *saved_level)
 {
 	/* Save the level regardless, just in case PJLIB is shutdown
 	 * between suspend and resume.
 	 */
-	*saved_level = pj_log_max_level;
+	*saved_level = pj_log_max_level[inst_id];
 
 #if PJ_HAS_THREADS
-    if (thread_suspended_tls_id != -1) 
+    if (thread_suspended_tls_id[inst_id] != -1) 
     {
-	pj_thread_local_set(thread_suspended_tls_id, (void*)PJ_TRUE);
+	pj_thread_local_set(thread_suspended_tls_id[inst_id], (void*)PJ_TRUE);
     } 
     else
 #endif
     {
-	pj_log_max_level = 0;
+	pj_log_max_level[inst_id] = 0;
     }
 }
 
 /* Resume logging facility for this thread */
-static void resume_logging(int *saved_level)
+static void resume_logging(int inst_id, int *saved_level)
 {
 #if PJ_HAS_THREADS
-    if (thread_suspended_tls_id != -1) 
+    if (thread_suspended_tls_id[inst_id] != -1) 
     {
-	pj_thread_local_set(thread_suspended_tls_id, (void*)PJ_FALSE);
+	pj_thread_local_set(thread_suspended_tls_id[inst_id], (void*)PJ_FALSE);
     }
     else
 #endif
@@ -213,28 +248,34 @@ static void resume_logging(int *saved_level)
 	/* Only revert the level if application doesn't change the
 	 * logging level between suspend and resume.
 	 */
-	if (pj_log_max_level==0 && *saved_level)
-	    pj_log_max_level = *saved_level;
+	if (pj_log_max_level[inst_id]==0 && *saved_level)
+	    pj_log_max_level[inst_id] = *saved_level;
     }
 }
 
 /* Is logging facility suspended for this thread? */
-static pj_bool_t is_logging_suspended(void)
+static pj_bool_t is_logging_suspended(int inst_id)
 {
 #if PJ_HAS_THREADS
-    if (thread_suspended_tls_id != -1) 
+    if (thread_suspended_tls_id[inst_id] != -1) 
     {
-	return pj_thread_local_get(thread_suspended_tls_id) != NULL;
+	return pj_thread_local_get(thread_suspended_tls_id[inst_id]) != NULL;
     }
     else
 #endif
     {
-	return pj_log_max_level == 0;
+	return pj_log_max_level[inst_id] == 0;
     }
 }
 
-PJ_DEF(void) pj_log( const char *sender, int level, 
-		     const char *format, va_list marker)
+PJ_DEF(void) pj_log( const char *sender, int level, //INST_TODO
+					 const char *format, va_list marker)
+{
+	pj_log2(sender, level, format, marker, 0);
+}
+
+PJ_DEF(void) pj_log2( const char *sender, int level, //INST_TODO
+		     const char *format, va_list marker, int flush)
 {
     pj_time_val now;
     pj_parsed_time ptime;
@@ -243,20 +284,21 @@ PJ_DEF(void) pj_log( const char *sender, int level,
     char log_buffer[PJ_LOG_MAX_SIZE];
 #endif
     int saved_level, len, print_len;
+	int inst_id = 0;
 
     PJ_CHECK_STACK();
 
-    if (level > pj_log_max_level)
+    if (level > pj_log_max_level[inst_id]) 
 	return;
 
-    if (is_logging_suspended())
+    if (is_logging_suspended(inst_id)) 
 	return;
 
     /* Temporarily disable logging for this thread. Some of PJLIB APIs that
      * this function calls below will recursively call the logging function 
      * back, hence it will cause infinite recursive calls if we allow that.
      */
-    suspend_logging(&saved_level);
+    suspend_logging(inst_id, &saved_level); 
 
     /* Get current date/time. */
     pj_gettimeofday(&now);
@@ -265,7 +307,7 @@ PJ_DEF(void) pj_log( const char *sender, int level,
     pre = log_buffer;
     if (log_decor & PJ_LOG_HAS_LEVEL_TEXT) {
 	static const char *ltexts[] = { "FATAL:", "ERROR:", " WARN:", 
-			      " INFO:", "DEBUG:", "TRACE:", "DETRC:"};
+		" INFO:", "DEBUG:", "TRACE:", "DETRC:"};
 	pj_ansi_strcpy(pre, ltexts[level]);
 	pre += 6;
     }
@@ -299,8 +341,17 @@ PJ_DEF(void) pj_log( const char *sender, int level,
 	*pre++ = '.';
 	pre += pj_utoa_pad(ptime.msec, pre, 3, '0');
     }
+
+	// Process Id
+	*pre++ = ' ';
+	pre += pj_utoa_pad(pj_getpid(), pre, 10, '0');
+
+	// Thread Id
+	*pre++ = '/';
+	pre += pj_utoa_pad(pj_gettid(), pre, 10, '0');
+
     if (log_decor & PJ_LOG_HAS_SENDER) {
-	enum { SENDER_WIDTH = 14 };
+	enum { SENDER_WIDTH = 17 };
 	int sender_len = strlen(sender);
 	*pre++ = ' ';
 	if (sender_len <= SENDER_WIDTH) {
@@ -316,7 +367,7 @@ PJ_DEF(void) pj_log( const char *sender, int level,
     }
     if (log_decor & PJ_LOG_HAS_THREAD_ID) {
 	enum { THREAD_WIDTH = 12 };
-	const char *thread_name = pj_thread_get_name(pj_thread_this());
+	const char *thread_name = pj_thread_get_name(pj_thread_this(inst_id));
 	int thread_len = strlen(thread_name);
 	*pre++ = ' ';
 	if (thread_len <= THREAD_WIDTH) {
@@ -371,10 +422,10 @@ PJ_DEF(void) pj_log( const char *sender, int level,
     /* It should be safe to resume logging at this point. Application can
      * recursively call the logging function inside the callback.
      */
-    resume_logging(&saved_level);
+    resume_logging(inst_id, &saved_level);
 
     if (log_writer)
-	(*log_writer)(level, log_buffer, len);
+	(*log_writer)(inst_id, level, log_buffer, len, flush);
 }
 
 /*

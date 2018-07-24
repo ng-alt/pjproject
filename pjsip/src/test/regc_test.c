@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: regc_test.c 4093 2012-04-26 09:26:07Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -291,7 +291,7 @@ static int do_test(const char *title,
     if (status != PJ_SUCCESS)
 	return -100;
 
-    status = pjsip_regc_init(regc, registrar_uri, &aor, &aor, contact_cnt,
+    status = pjsip_regc_init(0, regc, registrar_uri, &aor, &aor, contact_cnt,
 			     contacts, expires ? expires : 60);
     if (status != PJ_SUCCESS) {
 	pjsip_regc_destroy(regc);
@@ -559,7 +559,7 @@ static int update_test(const pj_str_t *registrar_uri)
      * replace the contact with new one 
      */
     PJ_LOG(3,(THIS_FILE, "   replacing contact"));
-    status = pjsip_regc_update_contact(regc, 1, &contacts[1]);
+    status = pjsip_regc_update_contact(0, regc, 1, &contacts[1]);
     if (status != PJ_SUCCESS) {
 	ret = -610;
 	goto on_return;
@@ -639,7 +639,7 @@ static int update_test(const pj_str_t *registrar_uri)
 	else
 	    PJ_LOG(3,(THIS_FILE, "   updating contacts with same contacts"));
 
-	status = pjsip_regc_update_contact(regc, 2, &contacts[1]);
+	status = pjsip_regc_update_contact(0, regc, 2, &contacts[1]);
 	if (status != PJ_SUCCESS) {
 	    ret = -710;
 	    goto on_return;
@@ -772,7 +772,7 @@ int regc_test(void)
 
 	    /* client expected results: */
 	    /* error	code	have_reg    expiration	contact_cnt auth?*/
-	    { PJ_FALSE,	503,	PJ_FALSE,   -1,		0,	    PJ_FALSE}
+	    { PJ_FALSE,	502,	PJ_FALSE,   -1,		0,	    PJ_FALSE}
 	},
 
 	/* timeout test */

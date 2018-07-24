@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_config.h 4091 2012-04-26 09:20:07Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -81,6 +81,13 @@ typedef struct pjsip_cfg_t
 	 * Disable rport in request.
 	 */
 	pj_bool_t disable_rport;
+
+	/**
+	 * Disable automatic switching from UDP to TCP if outgoing request
+	 * is greater than 1300 bytes. See PJSIP_DONT_SWITCH_TO_TCP.
+	 */
+	pj_bool_t disable_tcp_switch;
+
     } endpt;
 
     /** Transaction layer settings. */
@@ -237,7 +244,7 @@ PJ_INLINE(pjsip_cfg_t*) pjsip_cfg(void)
  * containing presence information can be quite large (>1500).
  */
 #ifndef PJSIP_MAX_PKT_LEN
-#   define PJSIP_MAX_PKT_LEN		4000
+#   define PJSIP_MAX_PKT_LEN		6000
 #endif
 
 
@@ -250,6 +257,9 @@ PJ_INLINE(pjsip_cfg_t*) pjsip_cfg(void)
  *
  * Disable the behavior of automatic switching to TCP whenever UDP packet
  * size exceeds the threshold defined in PJSIP_UDP_SIZE_THRESHOLD.
+ *
+ * This option can also be controlled at run-time by the \a disable_tcp_switch
+ * setting in pjsip_cfg_t.
  *
  * Default is 0 (no).
  */
@@ -266,7 +276,8 @@ PJ_INLINE(pjsip_cfg_t*) pjsip_cfg(void)
  * Default is 1300 bytes.
  */
 #ifndef PJSIP_UDP_SIZE_THRESHOLD
-#   define PJSIP_UDP_SIZE_THRESHOLD	1300
+//#   define PJSIP_UDP_SIZE_THRESHOLD	1300
+#   define PJSIP_UDP_SIZE_THRESHOLD	0
 #endif
 
 
@@ -417,13 +428,31 @@ PJ_INLINE(pjsip_cfg_t*) pjsip_cfg(void)
 
 
 /**
- * Idle timeout interval to be applied to transports with no usage
- * before the transport is destroyed. Value is in seconds.
+ * Idle timeout interval to be applied to outgoing transports (i.e. client
+ * side) with no usage before the transport is destroyed. Value is in
+ * seconds.
+ *
+ * Note that if the value is put lower than 33 seconds, it may cause some
+ * pjsip test units to fail. See the comment on the following link:
+ * https://trac.pjsip.org/repos/ticket/1465#comment:4
+ *
+ * Default: 33
+ */
+#ifndef PJSIP_TRANSPORT_IDLE_TIME
+#   define PJSIP_TRANSPORT_IDLE_TIME	33
+#endif
+
+
+/**
+ * Idle timeout interval to be applied to incoming transports (i.e. server
+ * side) with no usage before the transport is destroyed. Server typically
+ * should let client close the connection, hence set this interval to a large
+ * value. Value is in seconds.
  *
  * Default: 600
  */
-#ifndef PJSIP_TRANSPORT_IDLE_TIME
-#   define PJSIP_TRANSPORT_IDLE_TIME	600
+#ifndef PJSIP_TRANSPORT_SERVER_IDLE_TIME
+#   define PJSIP_TRANSPORT_SERVER_IDLE_TIME	600
 #endif
 
 

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pjmedia.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -63,6 +63,9 @@
 #include <pjmedia/transport_ice.h>
 #include <pjmedia/transport_loop.h>
 #include <pjmedia/transport_srtp.h>
+#include <pjmedia/transport_dtls.h>
+#include <pjmedia/transport_sctp.h>
+#include <pjmedia/transport_tcp.h>
 #include <pjmedia/transport_udp.h>
 #include <pjmedia/wav_playlist.h>
 #include <pjmedia/wav_port.h>

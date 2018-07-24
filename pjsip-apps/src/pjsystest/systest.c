@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: systest.c 4074 2012-04-24 07:38:41Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -196,7 +196,7 @@ static void systest_play_tone(void)
 
     PJ_LOG(3,(THIS_FILE, "Running %s", title));
 
-    pool = pjsua_pool_create("ringback", 512, 512);
+    pool = pjsua_pool_create(0, "ringback", 512, 512);
     samples_per_frame = systest.media_cfg.audio_frame_ptime * 
 			systest.media_cfg.clock_rate *
 			systest.media_cfg.channel_count / 1000;
@@ -226,11 +226,11 @@ static void systest_play_tone(void)
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    status = pjsua_conf_add_port(pool, ringback_port, &ringback_slot);
+    status = pjsua_conf_add_port(0, pool, ringback_port, &ringback_slot);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    status = pjsua_conf_connect(ringback_slot, 0);
+    status = pjsua_conf_connect(0, ringback_slot, 0);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
@@ -242,7 +242,7 @@ static void systest_play_tone(void)
 
 on_return:
     if (ringback_slot != -1)
-	pjsua_conf_remove_port(ringback_slot);
+	pjsua_conf_remove_port(0, ringback_slot);
     if (ringback_port)
 	pjmedia_port_destroy(ringback_port);
     if (pool)
@@ -273,10 +273,12 @@ static pj_status_t create_player(unsigned path_cnt, const char *paths[],
     unsigned i;
 
     for (i=0; i<path_cnt; ++i) {
-	status = pjsua_player_create(pj_cstr(&name, paths[i]), 0, p_id);
+	status = pjsua_player_create(0, pj_cstr(&name, paths[i]), 0, p_id);
 	if (status == PJ_SUCCESS)
 	    return PJ_SUCCESS;
     }
+
+	PJ_LOG(4, (THIS_FILE, "create_player() player not found."));
     return status;
 }
 
@@ -317,7 +319,7 @@ static void systest_play_wav(unsigned path_cnt, const char *paths[])
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    status = pjsua_conf_connect(pjsua_player_get_conf_port(play_id), 0);
+    status = pjsua_conf_connect(0, pjsua_player_get_conf_port(0, play_id), 0);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
@@ -329,7 +331,7 @@ static void systest_play_wav(unsigned path_cnt, const char *paths[])
 
 on_return:
     if (play_id != -1)
-	pjsua_player_destroy(play_id);
+	pjsua_player_destroy(0, play_id);
 
     if (status != PJ_SUCCESS) {
 	systest_perror("Sorry we've encountered error", status);
@@ -392,15 +394,15 @@ static void systest_rec_audio(void)
 
     PJ_LOG(3,(THIS_FILE, "Running %s", title));
 
-    pool = pjsua_pool_create("rectest", 512, 512);
+    pool = pjsua_pool_create(0, "rectest", 512, 512);
 
-    status = pjsua_recorder_create(&filename, 0, NULL, -1, 0, &rec_id);
+    status = pjsua_recorder_create(0, &filename, 0, NULL, -1, 0, &rec_id);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    rec_slot = pjsua_recorder_get_conf_port(rec_id);
+    rec_slot = pjsua_recorder_get_conf_port(0, rec_id);
 
-    status = pjsua_conf_connect(0, rec_slot);
+    status = pjsua_conf_connect(0, 0, rec_slot);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
@@ -409,18 +411,18 @@ static void systest_rec_audio(void)
 		     "something in the microphone. Press OK "
 		     "to stop recording", WITH_OK);
 
-    pjsua_conf_disconnect(0, rec_slot);
+    pjsua_conf_disconnect(0, 0, rec_slot);
     rec_slot = PJSUA_INVALID_ID;
-    pjsua_recorder_destroy(rec_id);
+    pjsua_recorder_destroy(0, rec_id);
     rec_id = PJSUA_INVALID_ID;
 
-    status = pjsua_player_create(&filename, 0, &play_id);
+    status = pjsua_player_create(0, &filename, 0, &play_id);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    play_slot = pjsua_player_get_conf_port(play_id);
+    play_slot = pjsua_player_get_conf_port(0, play_id);
 
-    status = pjsua_conf_connect(play_slot, 0);
+    status = pjsua_conf_connect(0, play_slot, 0);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
@@ -433,13 +435,13 @@ static void systest_rec_audio(void)
 
 on_return:
     if (rec_slot != PJSUA_INVALID_ID)
-	pjsua_conf_disconnect(0, rec_slot);
+	pjsua_conf_disconnect(0, 0, rec_slot);
     if (rec_id != PJSUA_INVALID_ID)
-	pjsua_recorder_destroy(rec_id);
+	pjsua_recorder_destroy(0, rec_id);
     if (play_slot != PJSUA_INVALID_ID)
-	pjsua_conf_disconnect(play_slot, 0);
+	pjsua_conf_disconnect(0, play_slot, 0);
     if (play_id != PJSUA_INVALID_ID)
-	pjsua_player_destroy(play_id);
+	pjsua_player_destroy(0, play_id);
     if (pool)
 	pj_pool_release(pool);
 
@@ -503,13 +505,13 @@ static void systest_audio_test(void)
     PJ_LOG(3,(THIS_FILE, "Running %s", title));
 
     /* Disable sound device in pjsua first */
-    pjsua_set_no_snd_dev();
+    pjsua_set_no_snd_dev(0);
 
     /* Setup parameters */
     status = pjmedia_aud_dev_default_param(systest.play_id, &param);
     if (status != PJ_SUCCESS) {
 	systest_perror("Sorry we had error in pjmedia_aud_dev_default_param()", status);
-	pjsua_set_snd_dev(systest.rec_id, systest.play_id);
+	pjsua_set_snd_dev(0, systest.rec_id, systest.play_id);
 	ti->success = PJ_FALSE;
 	pj_strerror(status, ti->reason, sizeof(ti->reason));
 	ti->reason[sizeof(ti->reason)-1] = '\0';
@@ -534,7 +536,7 @@ static void systest_audio_test(void)
     status = pjmedia_aud_test(&param, &result);
     if (status != PJ_SUCCESS) {
 	systest_perror("Sorry we encountered error with the test", status);
-	pjsua_set_snd_dev(systest.rec_id, systest.play_id);
+	pjsua_set_snd_dev(0, systest.rec_id, systest.play_id);
 	ti->success = PJ_FALSE;
 	pj_strerror(status, ti->reason, sizeof(ti->reason));
 	ti->reason[sizeof(ti->reason)-1] = '\0';
@@ -542,7 +544,7 @@ static void systest_audio_test(void)
     }
 
     /* Restore pjsua sound device */
-    pjsua_set_snd_dev(systest.rec_id, systest.play_id);
+    pjsua_set_snd_dev(0, systest.rec_id, systest.play_id);
 
     /* Analyze the result! */
     strcpy(textbuf, "Here are the audio statistics:\r\n");
@@ -796,20 +798,20 @@ static void systest_latency_test(void)
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    play_slot = pjsua_player_get_conf_port(play_id);
+    play_slot = pjsua_player_get_conf_port(0, play_id);
 
     rec_wav_file = pj_str(add_path(doc_path, WAV_LATENCY_OUT_PATH));
-    status = pjsua_recorder_create(&rec_wav_file, 0, NULL, -1, 0, &rec_id);
+    status = pjsua_recorder_create(0, &rec_wav_file, 0, NULL, -1, 0, &rec_id);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    rec_slot = pjsua_recorder_get_conf_port(rec_id);
+    rec_slot = pjsua_recorder_get_conf_port(0, rec_id);
 
     /* Setup the test */
     //status = pjsua_conf_connect(0, 0);
-    status = pjsua_conf_connect(play_slot, 0);
-    status = pjsua_conf_connect(0, rec_slot);
-    status = pjsua_conf_connect(play_slot, rec_slot);
+    status = pjsua_conf_connect(0, play_slot, 0);
+    status = pjsua_conf_connect(0, 0, rec_slot);
+    status = pjsua_conf_connect(0, play_slot, rec_slot);
     
 
     /* We're running */
@@ -818,14 +820,14 @@ static void systest_latency_test(void)
 
     /* Done with the test */
     //status = pjsua_conf_disconnect(0, 0);
-    status = pjsua_conf_disconnect(play_slot, rec_slot);
-    status = pjsua_conf_disconnect(0, rec_slot);
-    status = pjsua_conf_disconnect(play_slot, 0);
+    status = pjsua_conf_disconnect(0, play_slot, rec_slot);
+    status = pjsua_conf_disconnect(0, 0, rec_slot);
+    status = pjsua_conf_disconnect(0, play_slot, 0);
 
-    pjsua_recorder_destroy(rec_id);
+    pjsua_recorder_destroy(0, rec_id);
     rec_id = PJSUA_INVALID_ID;
 
-    pjsua_player_destroy(play_id);
+    pjsua_player_destroy(0, play_id);
     play_id = PJSUA_INVALID_ID;
 
     /* Confirm that echo is heard */
@@ -835,13 +837,13 @@ static void systest_latency_test(void)
 	       "and please confirm that you can hear the 'tock' echo.",
 	       WITH_OK);
 
-    status = pjsua_player_create(&rec_wav_file, 0, &play_id);
+    status = pjsua_player_create(0, &rec_wav_file, 0, &play_id);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
-    play_slot = pjsua_player_get_conf_port(play_id);
+    play_slot = pjsua_player_get_conf_port(0, play_id);
 
-    status = pjsua_conf_connect(play_slot, 0);
+    status = pjsua_conf_connect(0, play_slot, 0);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
@@ -850,14 +852,14 @@ static void systest_latency_test(void)
 		     "Can you hear the 'tock' echo?",
 		     WITH_YESNO);
 
-    pjsua_player_destroy(play_id);
+    pjsua_player_destroy(0, play_id);
     play_id = PJSUA_INVALID_ID;
 
     if (key != KEY_YES)
 	goto on_return;
 
     /* Now analyze the latency */
-    pool = pjsua_pool_create("latency", 512, 512);
+    pool = pjsua_pool_create(0, "latency", 512, 512);
 
     status = pjmedia_wav_player_port_create(pool, rec_wav_file.ptr, 0, 0, 0, &wav_port);
     if (status != PJ_SUCCESS)
@@ -874,9 +876,9 @@ on_return:
     if (pool)
 	pj_pool_release(pool);
     if (play_id != PJSUA_INVALID_ID)
-	pjsua_player_destroy(play_id);
+	pjsua_player_destroy(0, play_id);
     if (rec_id != PJSUA_INVALID_ID)
-	pjsua_recorder_destroy(rec_id);
+	pjsua_recorder_destroy(0, rec_id);
 
     if (status != PJ_SUCCESS) {
 	systest_perror("Sorry we encountered an error: ", status);
@@ -946,12 +948,12 @@ static void systest_aec_test(void)
     }
 
     /* Save current EC tail */
-    status = pjsua_get_ec_tail(&last_ec_tail);
+    status = pjsua_get_ec_tail(0, &last_ec_tail);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
     /* Set EC tail setting to default */
-    status = pjsua_set_ec(PJSUA_DEFAULT_EC_TAIL_LEN, 0);
+    status = pjsua_set_ec(0, PJSUA_DEFAULT_EC_TAIL_LEN, 0);
     if (status != PJ_SUCCESS)
 	goto on_return;
 
@@ -966,8 +968,9 @@ static void systest_aec_test(void)
 	goto on_return;
     }
 
-    status = pjsua_recorder_create(pj_cstr(&tmp, AEC_REC_PATH), 0, 0, -1,
-			           0, &writer_id);
+    status = pjsua_recorder_create(0,
+                 pj_cstr(&tmp, add_path(doc_path, AEC_REC_PATH)), 0, 0, -1,
+                 0, &writer_id);
     if (status != PJ_SUCCESS) {
 	PJ_PERROR(1,(THIS_FILE, status, "Error writing WAV file %s",
 		     AEC_REC_PATH));
@@ -977,9 +980,9 @@ static void systest_aec_test(void)
     /*
      * Start playback and recording.
      */
-    pjsua_conf_connect(pjsua_player_get_conf_port(player_id), 0);
+    pjsua_conf_connect(0, pjsua_player_get_conf_port(0, player_id), 0);
     pj_thread_sleep(100);
-    pjsua_conf_connect(0, pjsua_recorder_get_conf_port(writer_id));
+    pjsua_conf_connect(0, 0, pjsua_recorder_get_conf_port(0, writer_id));
 
     /* Wait user signal */
     gui_msgbox(title, "AEC/AES test is running. Press OK to stop this test.",
@@ -988,22 +991,24 @@ static void systest_aec_test(void)
     /*
      * Stop and close playback and recorder
      */
-    pjsua_conf_disconnect(0, pjsua_recorder_get_conf_port(writer_id));
-    pjsua_conf_disconnect(pjsua_player_get_conf_port(player_id), 0);
-    pjsua_recorder_destroy(writer_id);
-    pjsua_player_destroy(player_id);
+    pjsua_conf_disconnect(0, 0, pjsua_recorder_get_conf_port(0, writer_id));
+    pjsua_conf_disconnect(0, pjsua_player_get_conf_port(0, player_id), 0);
+    pjsua_recorder_destroy(0, writer_id);
+    pjsua_player_destroy(0, player_id);
     player_id = PJSUA_INVALID_ID;
     writer_id = PJSUA_INVALID_ID;
 
     /*
      * Play the result.
      */
-    status = pjsua_player_create(pj_cstr(&tmp, AEC_REC_PATH), 0, &player_id);
+    status = pjsua_player_create(0,
+                 pj_cstr(&tmp, add_path(doc_path, AEC_REC_PATH)),
+                 0, &player_id);
     if (status != PJ_SUCCESS) {
 	PJ_PERROR(1,(THIS_FILE, status, "Error opening WAV file %s", AEC_REC_PATH));
 	goto on_return;
     }
-    pjsua_conf_connect(pjsua_player_get_conf_port(player_id), 0);
+    pjsua_conf_connect(0, pjsua_player_get_conf_port(0, player_id), 0);
 
     /* Wait user signal */
     gui_msgbox(title, "We are now playing the captured audio from the mic. "
@@ -1013,7 +1018,7 @@ static void systest_aec_test(void)
 		      "Press OK to stop.",
 		      WITH_OK);
 
-    pjsua_conf_disconnect(pjsua_player_get_conf_port(player_id), 0);
+    pjsua_conf_disconnect(0, pjsua_player_get_conf_port(0, player_id), 0);
 
     key = gui_msgbox(title,
 		     "Did you notice any echo in the recording?",
@@ -1022,14 +1027,14 @@ static void systest_aec_test(void)
 
 on_return:
     if (player_id != PJSUA_INVALID_ID)
-	pjsua_player_destroy(player_id);
+	pjsua_player_destroy(0, player_id);
     if (writer_id != PJSUA_INVALID_ID)
-	pjsua_recorder_destroy(writer_id);
+	pjsua_recorder_destroy(0, writer_id);
 
     /* Wait until sound device closed before restoring back EC tail setting */
-    while (pjsua_snd_is_active())
+    while (pjsua_snd_is_active(0))
 	pj_thread_sleep(10);
-    pjsua_set_ec(last_ec_tail, 0);
+    pjsua_set_ec(0, last_ec_tail, 0);
 
 
     if (status != PJ_SUCCESS) {
@@ -1233,16 +1238,16 @@ int systest_init(void)
     systest.media_cfg.snd_rec_latency = OVERRIDE_AUDDEV_REC_LAT;
 #endif
 	
-    status = pjsua_init(&systest.ua_cfg, &log_cfg, &systest.media_cfg);
+    status = pjsua_init(0, &systest.ua_cfg, &log_cfg, &systest.media_cfg);
     if (status != PJ_SUCCESS) {
-	pjsua_destroy();
+	pjsua_destroy(0);
 	systest_perror("Sorry we've had error in pjsua_init(): ", status);
 	return status;
     }
 
-    status = pjsua_start();
+    status = pjsua_start(0);
     if (status != PJ_SUCCESS) {
-	pjsua_destroy();
+	pjsua_destroy(0);
 	systest_perror("Sorry we've had error in pjsua_start(): ", status);
 	return status;
     }
@@ -1263,7 +1268,7 @@ int systest_set_dev(int cap_dev, int play_dev)
 {
     systest.rec_id = systest_cap_dev_id = cap_dev;
     systest.play_id = systest_play_dev_id = play_dev;
-    return pjsua_set_snd_dev(cap_dev, play_dev);
+    return pjsua_set_snd_dev(0, cap_dev, play_dev);
 }
 
 static void systest_wizard(void)
@@ -1297,7 +1302,7 @@ void systest_save_result(const char *filename)
     const char *text;
     pj_status_t status;
 
-    status = pj_file_open(NULL, filename, PJ_O_WRONLY | PJ_O_APPEND, &fd);
+    status = pj_file_open(NULL, filename, PJ_O_WRONLY | PJ_O_APPEND, &fd, NULL);
     if (status != PJ_SUCCESS) {
 	pj_ansi_snprintf(textbuf, sizeof(textbuf),
 			 "Error opening file %s",
@@ -1356,6 +1361,5 @@ void systest_save_result(const char *filename)
 void systest_deinit(void)
 {
     gui_destroy();
-    pjsua_destroy();
+    pjsua_destroy(0);
 }
-

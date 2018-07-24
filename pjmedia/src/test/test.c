@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: test.c 3681 2011-07-24 09:13:11Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -59,11 +59,11 @@ int test_main(void)
     int rc = 0;
     pj_caching_pool caching_pool;
 
-    pj_init();
-    pj_caching_pool_init(&caching_pool, &pj_pool_factory_default_policy, 0);
+    pj_init(0);
+    pj_caching_pool_init(0, &caching_pool, &pj_pool_factory_default_policy, 0);
 
     pj_log_set_decor(PJ_LOG_HAS_NEWLINE);
-    pj_log_set_level(3);
+    pj_log_set_level(0, 3);
 
     mem = &caching_pool.factory;
 

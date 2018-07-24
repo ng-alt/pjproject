@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pool_caching.c 4395 2013-02-27 12:07:30Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -50,7 +50,7 @@ static pj_size_t pool_sizes[PJ_CACHING_POOL_ARRAY_SIZE] =
 #define START_SIZE  5
 
 
-PJ_DEF(void) pj_caching_pool_init( pj_caching_pool *cp, 
+PJ_DEF(void) pj_caching_pool_init( int inst_id, pj_caching_pool *cp, 
 				   const pj_pool_factory_policy *policy,
 				   pj_size_t max_capacity)
 {
@@ -61,6 +61,7 @@ PJ_DEF(void) pj_caching_pool_init( pj_caching_pool *cp,
 
     pj_bzero(cp, sizeof(*cp));
     
+	cp->inst_id = inst_id;
     cp->max_capacity = max_capacity;
     pj_list_init(&cp->used_list);
     for (i=0; i<PJ_CACHING_POOL_ARRAY_SIZE; ++i)
@@ -76,9 +77,12 @@ PJ_DEF(void) pj_caching_pool_init( pj_caching_pool *cp,
     cp->factory.dump_status = &cpool_dump_status;
     cp->factory.on_block_alloc = &cpool_on_block_alloc;
     cp->factory.on_block_free = &cpool_on_block_free;
-
-    pool = pj_pool_create_on_buf("cachingpool", cp->pool_buf, sizeof(cp->pool_buf));
+	cp->factory.inst_id = inst_id;
+	//printf("inst_id=%d\n", cp->factory.inst_id);
+    //modified by Charles
+    pool = pj_pool_create_on_buf(inst_id, "cachingpool", cp->pool_buf, 2*sizeof(cp->pool_buf));
     pj_lock_create_simple_mutex(pool, "cachingpool", &cp->lock);
+	//printf("%p\n", ((pj_mutex_t *)cp->lock));
 }
 
 PJ_DEF(void) pj_caching_pool_destroy( pj_caching_pool *cp )
@@ -178,7 +182,11 @@ static pj_pool_t* cpool_create_pool(pj_pool_factory *pf,
 	pj_pool_init_int(pool, name, increment_sz, callback);
 
 	/* Update pool manager's free capacity. */
+	if (cp->capacity > pj_pool_get_capacity(pool)) {
 	cp->capacity -= pj_pool_get_capacity(pool);
+	} else {
+	    cp->capacity = 0;
+	}
 
 	PJ_LOG(6, (pool->obj_name, "pool reused, size=%u", pool->capacity));
     }
@@ -199,7 +207,7 @@ static pj_pool_t* cpool_create_pool(pj_pool_factory *pf,
 static void cpool_release_pool( pj_pool_factory *pf, pj_pool_t *pool)
 {
     pj_caching_pool *cp = (pj_caching_pool*)pf;
-    unsigned pool_capacity;
+    pj_size_t pool_capacity;
     unsigned i;
 
     PJ_CHECK_STACK();

@@ -53,10 +53,10 @@ static int test_inner(void)
 
     mem = &caching_pool.factory;
 
-    pj_log_set_level(3);
+    pj_log_set_level(0, 3);
     pj_log_set_decor(param_log_decor);
 
-    rc = pj_init();
+    rc = pj_init(0);
     if (rc != 0) {
 	app_perror("pj_init() error!!", rc);
 	return rc;
@@ -66,7 +66,7 @@ static int test_inner(void)
     pj_assert(rc == 0);
 
     pj_dump_config();
-    pj_caching_pool_init( &caching_pool, &pj_pool_factory_default_policy, 0 );
+    pj_caching_pool_init( 0, &caching_pool, &pj_pool_factory_default_policy, 0 );
 
 #if INCLUDE_XML_TEST
     DO_TEST(xml_test());
@@ -97,15 +97,15 @@ int test_main(void)
 {
     PJ_USE_EXCEPTION;
 
-    PJ_TRY {
+    PJ_TRY(0) {
         return test_inner();
     }
     PJ_CATCH_ANY {
         int id = PJ_GET_EXCEPTION();
         PJ_LOG(3,("test", "FATAL: unhandled exception id %d (%s)", 
-                  id, pj_exception_id_name(id)));
+                  id, pj_exception_id_name(0, id)));
     }
-    PJ_END;
+    PJ_END(0);
 
     return -1;
 }

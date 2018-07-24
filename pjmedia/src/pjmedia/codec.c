@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: codec.c 4329 2013-01-23 02:57:30Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -38,6 +38,39 @@ struct pjmedia_codec_default_param
 
 /* Sort codecs in codec manager based on priorities */
 static void sort_codecs(pjmedia_codec_mgr *mgr);
+
+
+/*
+ * Duplicate codec parameter.
+ */
+PJ_DEF(pjmedia_codec_param*) pjmedia_codec_param_clone(
+					pj_pool_t *pool,
+					const pjmedia_codec_param *src)
+{
+    pjmedia_codec_param *p;
+    unsigned i;
+
+    PJ_ASSERT_RETURN(pool && src, NULL);
+
+    p = PJ_POOL_ZALLOC_T(pool, pjmedia_codec_param);
+
+    /* Update codec param */
+    pj_memcpy(p, src, sizeof(pjmedia_codec_param));
+    for (i = 0; i < src->setting.dec_fmtp.cnt; ++i) {
+	pj_strdup(pool, &p->setting.dec_fmtp.param[i].name,
+		  &src->setting.dec_fmtp.param[i].name);
+	pj_strdup(pool, &p->setting.dec_fmtp.param[i].val,
+		  &src->setting.dec_fmtp.param[i].val);
+    }
+    for (i = 0; i < src->setting.enc_fmtp.cnt; ++i) {
+	pj_strdup(pool, &p->setting.enc_fmtp.param[i].name,
+		  &src->setting.enc_fmtp.param[i].name);
+	pj_strdup(pool, &p->setting.enc_fmtp.param[i].val,
+		  &src->setting.enc_fmtp.param[i].val);
+    }
+
+    return p;
+}
 
 
 /*
@@ -166,8 +199,9 @@ PJ_DEF(pj_status_t) pjmedia_codec_mgr_unregister_factory(
 
     /* Factory must be registered. */
     if (pj_list_find_node(&mgr->factory_list, factory) != factory) {
-	pj_mutex_unlock(mgr->mutex);
-	return PJ_ENOTFOUND;
+		pj_mutex_unlock(mgr->mutex);
+		PJ_LOG(4, ("codec.c", "pjmedia_codec_mgr_unregister_factory() factory not found."));
+		return PJ_ENOTFOUND;
     }
 
     /* Erase factory from the factory list */
@@ -245,12 +279,12 @@ PJ_DEF(pj_status_t) pjmedia_codec_mgr_get_codec_info( pjmedia_codec_mgr *mgr,
 {
     unsigned i;
 
-    PJ_ASSERT_RETURN(mgr && p_info && pt>=0 && pt < 96, PJ_EINVAL);
+    PJ_ASSERT_RETURN(mgr && p_info && pt>=0 && (pt < 96 || pt == 5000), PJ_EINVAL);  // dean : 5000 is for WebRTC data channel.
 
     pj_mutex_lock(mgr->mutex);
 
     for (i=0; i<mgr->codec_cnt; ++i) {
-	if (mgr->codec_desc[i].info.pt == pt) {
+	if (mgr->codec_desc[i].info.pt == pt || pt == 5000) { // dean : 5000 is for WebRTC data channel.
 	    *p_info = &mgr->codec_desc[i].info;
 
 	    pj_mutex_unlock(mgr->mutex);
@@ -332,6 +366,8 @@ PJ_DEF(pj_status_t) pjmedia_codec_mgr_find_codecs_by_id( pjmedia_codec_mgr *mgr,
 
     *count = found;
 
+	if (!found)
+		PJ_LOG(4, ("codec.c", "pjmedia_codec_mgr_find_codecs_by_id() codec not found."));
     return found ? PJ_SUCCESS : PJ_ENOTFOUND;
 }
 
@@ -408,8 +444,9 @@ PJ_DEF(pj_status_t) pjmedia_codec_mgr_set_codec_priority(
     }
 
     if (!found) {
-	pj_mutex_unlock(mgr->mutex);
-	return PJ_ENOTFOUND;
+		pj_mutex_unlock(mgr->mutex);
+		PJ_LOG(4, ("codec.c", "pjmedia_codec_mgr_set_codec_priority() codec not found."));
+		return PJ_ENOTFOUND;
     }
 
     /* Re-sort codecs */

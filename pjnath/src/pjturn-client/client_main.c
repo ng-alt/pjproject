@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: client_main.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -108,7 +108,7 @@ static int init()
     int i;
     pj_status_t status;
 
-    CHECK( pj_init() );
+    CHECK( pj_init(0) );
     CHECK( pjlib_util_init() );
     CHECK( pjnath_init() );
 
@@ -118,12 +118,12 @@ static int init()
 	return PJ_EINVAL;
     }
 
-    pj_caching_pool_init(&g.cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &g.cp, &pj_pool_factory_default_policy, 0);
 
     g.pool = pj_pool_create(&g.cp.factory, "main", 1000, 1000, NULL);
 
     /* Init global STUN config */
-    pj_stun_config_init(&g.stun_config, &g.cp.factory, 0, NULL, NULL);
+    pj_stun_config_init(0, &g.stun_config, &g.cp.factory, 0, NULL, NULL);
 
     /* Create global timer heap */
     CHECK( pj_timer_heap_create(g.pool, 1000, &g.stun_config.timer_heap) );

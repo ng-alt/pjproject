@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: session.h 3571 2011-05-19 08:05:23Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -285,6 +285,10 @@ PJ_DECL(pj_status_t) pjmedia_session_get_port( pjmedia_session *session,
 					       unsigned index,
 					       pjmedia_port **p_port);
 
+PJ_DECL(pj_status_t) pjmedia_session_get_stream(  pjmedia_session *session,
+											   unsigned index,
+											   pjmedia_stream **p_stream);
+
 
 /**
  * Get session statistics. The stream statistic shows various
@@ -410,11 +414,11 @@ PJ_DECL(pj_status_t) pjmedia_session_get_dtmf( pjmedia_session *session,
  */
 PJ_DECL(pj_status_t)
 pjmedia_session_set_dtmf_callback(pjmedia_session *session,
-				  unsigned index,
-				  void (*cb)(pjmedia_stream*, 
-				 	     void *user_data, 
-					     int digit), 
-				  void *user_data);
+                                  unsigned index,
+                                  void (*cb)(pjmedia_stream*, 
+                                             void *user_data, 
+                                             int digit), 
+                                  void *user_data);
 
 /**
  * Destroy media session.
@@ -424,6 +428,17 @@ pjmedia_session_set_dtmf_callback(pjmedia_session *session,
  * @return		PJ_SUCCESS if success.
  */
 PJ_DECL(pj_status_t) pjmedia_session_destroy(pjmedia_session *session);
+
+PJ_DECL(pj_status_t) pjmedia_session_get_stream_info(pjmedia_session *session,
+													 unsigned index,
+													 pjmedia_stream_info **p_stream_info);
+
+#if 0 // 2013-10-20 DEAN, deprecated
+PJ_DECL(pj_status_t)
+pjmedia_session_set_nsmd_callback(pjmedia_session *session,
+								  unsigned index,
+								  void (*cb)(int call_id));
+#endif
 
 
 

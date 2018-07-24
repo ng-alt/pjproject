@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: wav_writer.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -113,7 +113,7 @@ PJ_DEF(pj_status_t) pjmedia_wav_writer_port_create( pj_pool_t *pool,
      * We need the read mode because we'll modify the WAVE header once
      * the recording has completed.
      */
-    status = pj_file_open(pool, filename, PJ_O_WRONLY, &fport->fd);
+    status = pj_file_open(pool, filename, PJ_O_WRONLY, &fport->fd, NULL);
     if (status != PJ_SUCCESS)
 	return status;
 

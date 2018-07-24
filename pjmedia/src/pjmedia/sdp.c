@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sdp.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -29,6 +29,7 @@
 #include <pj/assert.h>
 #include <pj/ctype.h>
 
+#include <bzlib.h> // natnl add
 
 enum {
     SKIP_WS = 0,
@@ -68,34 +69,34 @@ static void on_scanner_error(pj_scanner *scanner);
 /*
  * Scanner character specification.
  */
-static int is_initialized;
-static pj_cis_buf_t cis_buf;
-static pj_cis_t cs_digit, cs_token;
+static int is_initialized[PJSUA_MAX_INSTANCES];
+static pj_cis_buf_t cis_buf[PJSUA_MAX_INSTANCES];
+static pj_cis_t cs_digit[PJSUA_MAX_INSTANCES], cs_token[PJSUA_MAX_INSTANCES];
 
-static void init_sdp_parser(void)
+static void init_sdp_parser(int inst_id)
 {
-    if (is_initialized != 0)
+    if (is_initialized[inst_id] != 0)
 	return;
 
-    pj_enter_critical_section();
+    pj_enter_critical_section(inst_id);
 
-    if (is_initialized != 0) {
-	pj_leave_critical_section();
+    if (is_initialized[inst_id] != 0) {
+	pj_leave_critical_section(inst_id);
 	return;
     }
     
-    pj_cis_buf_init(&cis_buf);
+    pj_cis_buf_init(&cis_buf[inst_id]);
 
-    pj_cis_init(&cis_buf, &cs_token);
-    pj_cis_add_alpha(&cs_token);
-    pj_cis_add_num(&cs_token);
-    pj_cis_add_str(&cs_token, TOKEN);
+    pj_cis_init(&cis_buf[inst_id], &cs_token[inst_id]);
+    pj_cis_add_alpha(&cs_token[inst_id]);
+    pj_cis_add_num(&cs_token[inst_id]);
+    pj_cis_add_str(&cs_token[inst_id], TOKEN);
 
-    pj_cis_init(&cis_buf, &cs_digit);
-    pj_cis_add_num(&cs_digit);
+    pj_cis_init(&cis_buf[inst_id], &cs_digit[inst_id]);
+    pj_cis_add_num(&cs_digit[inst_id]);
 
-    is_initialized = 1;
-    pj_leave_critical_section();
+    is_initialized[inst_id] = 1;
+    pj_leave_critical_section(inst_id);
 }
 
 PJ_DEF(pjmedia_sdp_attr*) pjmedia_sdp_attr_create( pj_pool_t *pool,
@@ -235,11 +236,15 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_remove( unsigned *count,
 	}
     }
 
+	if (!removed)
+		PJ_LOG(4, ("sdp.c", "pjmedia_sdp_attr_remove() sdp_attr not found."));
+
     return removed ? PJ_SUCCESS : PJ_ENOTFOUND;
 }
 
 
-PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( const pjmedia_sdp_attr *attr,
+PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( int inst_id, 
+						 const pjmedia_sdp_attr *attr,
 						 pjmedia_sdp_rtpmap *rtpmap)
 {
     pj_scanner scanner;
@@ -252,7 +257,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( const pjmedia_sdp_attr *attr,
 
     PJ_ASSERT_RETURN(attr->value.slen != 0, PJMEDIA_SDP_EINATTR);
 
-    init_sdp_parser();
+    init_sdp_parser(inst_id);
 
     /* Check if input is null terminated, and null terminate if
      * necessary. Unfortunately this may crash the application if
@@ -269,7 +274,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( const pjmedia_sdp_attr *attr,
 	attr->value.ptr[attr->value.slen] = '\0';
     }
 
-    pj_scan_init(&scanner, (char*)attr->value.ptr, attr->value.slen,
+    pj_scan_init(inst_id, &scanner, (char*)attr->value.ptr, attr->value.slen,
 		 PJ_SCAN_AUTOSKIP_WS, &on_scanner_error);
 
     /* rtpmap sample:
@@ -281,14 +286,14 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( const pjmedia_sdp_attr *attr,
     rtpmap->clock_rate = 0;
 
     /* Parse */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 
 	/* Get payload type. */
-	pj_scan_get(&scanner, &cs_token, &rtpmap->pt);
+	pj_scan_get(&scanner, &cs_token[inst_id], &rtpmap->pt);
 
 
 	/* Get encoding name. */
-	pj_scan_get(&scanner, &cs_token, &rtpmap->enc_name);
+	pj_scan_get(&scanner, &cs_token[inst_id], &rtpmap->enc_name);
 
 	/* Expecting '/' after encoding name. */
 	if (pj_scan_get_char(&scanner) != '/') {
@@ -298,7 +303,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( const pjmedia_sdp_attr *attr,
 
 
 	/* Get the clock rate. */
-	pj_scan_get(&scanner, &cs_digit, &token);
+	pj_scan_get(&scanner, &cs_digit[inst_id], &token);
 	rtpmap->clock_rate = pj_strtoul(&token);
 
 	/* Expecting either '/' or EOF */
@@ -315,7 +320,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtpmap( const pjmedia_sdp_attr *attr,
     PJ_CATCH_ANY {
 	status = PJMEDIA_SDP_EINRTPMAP;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
 
 on_return:
@@ -363,7 +368,8 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_fmtp( const pjmedia_sdp_attr *attr,
 }
 
 
-PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtcp(const pjmedia_sdp_attr *attr,
+PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtcp(int inst_id, 
+						  const pjmedia_sdp_attr *attr,
 					      pjmedia_sdp_rtcp_attr *rtcp)
 {
     pj_scanner scanner;
@@ -373,36 +379,36 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtcp(const pjmedia_sdp_attr *attr,
 
     PJ_ASSERT_RETURN(pj_strcmp2(&attr->name, "rtcp")==0, PJ_EINVALIDOP);
 
-    init_sdp_parser();
+    init_sdp_parser(inst_id);
 
     /* fmtp BNF:
      *	a=rtcp:<port> [nettype addrtype address]
      */
 
-    pj_scan_init(&scanner, (char*)attr->value.ptr, attr->value.slen,
+    pj_scan_init(inst_id, &scanner, (char*)attr->value.ptr, attr->value.slen,
 		 PJ_SCAN_AUTOSKIP_WS, &on_scanner_error);
 
     /* Init */
     rtcp->net_type.slen = rtcp->addr_type.slen = rtcp->addr.slen = 0;
 
     /* Parse */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 
 	/* Get the port */
-	pj_scan_get(&scanner, &cs_token, &token);
+	pj_scan_get(&scanner, &cs_token[inst_id], &token);
 	rtcp->port = pj_strtoul(&token);
 
 	/* Have address? */
 	if (!pj_scan_is_eof(&scanner)) {
 
 	    /* Get network type */
-	    pj_scan_get(&scanner, &cs_token, &rtcp->net_type);
+	    pj_scan_get(&scanner, &cs_token[inst_id], &rtcp->net_type);
 
 	    /* Get address type */
-	    pj_scan_get(&scanner, &cs_token, &rtcp->addr_type);
+	    pj_scan_get(&scanner, &cs_token[inst_id], &rtcp->addr_type);
 
 	    /* Get the address */
-	    pj_scan_get(&scanner, &cs_token, &rtcp->addr);
+	    pj_scan_get(&scanner, &cs_token[inst_id], &rtcp->addr);
 
 	}
 
@@ -412,7 +418,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_get_rtcp(const pjmedia_sdp_attr *attr,
     PJ_CATCH_ANY {
 	status = PJMEDIA_SDP_EINRTCP;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     pj_scan_fini(&scanner);
     return status;
@@ -454,7 +460,8 @@ PJ_DEF(pjmedia_sdp_attr*) pjmedia_sdp_attr_create_rtcp(pj_pool_t *pool,
 }
 
 
-PJ_DEF(pj_status_t) pjmedia_sdp_attr_to_rtpmap(pj_pool_t *pool,
+PJ_DEF(pj_status_t) pjmedia_sdp_attr_to_rtpmap(int inst_id, 
+						   pj_pool_t *pool,
 					       const pjmedia_sdp_attr *attr,
 					       pjmedia_sdp_rtpmap **p_rtpmap)
 {
@@ -463,7 +470,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_attr_to_rtpmap(pj_pool_t *pool,
     *p_rtpmap = PJ_POOL_ALLOC_T(pool, pjmedia_sdp_rtpmap);
     PJ_ASSERT_RETURN(*p_rtpmap, PJ_ENOMEM);
 
-    return pjmedia_sdp_attr_get_rtpmap(attr, *p_rtpmap);
+    return pjmedia_sdp_attr_get_rtpmap(inst_id, attr, *p_rtpmap);
 }
 
 
@@ -1012,12 +1019,12 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
     pj_scan_get_char(scanner);
 
     /* port */
-    pj_scan_get(scanner, &cs_token, &str);
+    pj_scan_get(scanner, &cs_token[scanner->inst_id], &str);
     med->desc.port = (unsigned short)pj_strtoul(&str);
     if (*scanner->curptr == '/') {
 	/* port count */
 	pj_scan_get_char(scanner);
-	pj_scan_get(scanner, &cs_token, &str);
+	pj_scan_get(scanner, &cs_token[scanner->inst_id], &str);
 	med->desc.port_count = pj_strtoul(&str);
 
     } else {
@@ -1025,7 +1032,7 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
     }
 
     if (pj_scan_get_char(scanner) != ' ') {
-	PJ_THROW(SYNTAX_ERROR);
+	PJ_THROW(scanner->inst_id, SYNTAX_ERROR);
     }
 
     /* transport */
@@ -1042,7 +1049,7 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
 	if ((*scanner->curptr == '\r') || (*scanner->curptr == '\n'))
 		break;
 
-	pj_scan_get(scanner, &cs_token, &fmt);
+	pj_scan_get(scanner, &cs_token[scanner->inst_id], &fmt);
 	if (med->desc.fmt_count < PJMEDIA_MAX_SDP_FMT)
 	    med->desc.fmt[med->desc.fmt_count++] = fmt;
 	else
@@ -1058,9 +1065,7 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
 
 static void on_scanner_error(pj_scanner *scanner)
 {
-    PJ_UNUSED_ARG(scanner);
-
-    PJ_THROW(SYNTAX_ERROR);
+    PJ_THROW(scanner->inst_id, SYNTAX_ERROR);
 }
 
 static pjmedia_sdp_attr *parse_attr( pj_pool_t *pool, pj_scanner *scanner,
@@ -1082,7 +1087,7 @@ static pjmedia_sdp_attr *parse_attr( pj_pool_t *pool, pj_scanner *scanner,
     pj_scan_advance_n(scanner, 2, SKIP_WS);
     
     /* get attr name. */
-    pj_scan_get(scanner, &cs_token, &attr->name);
+    pj_scan_get(scanner, &cs_token[scanner->inst_id], &attr->name);
 
     if (*scanner->curptr && *scanner->curptr != '\r' && 
 	*scanner->curptr != '\n') 
@@ -1171,8 +1176,9 @@ static void apply_media_direction(pjmedia_sdp_session *sdp)
 /*
  * Parse SDP message.
  */
-PJ_DEF(pj_status_t) pjmedia_sdp_parse( pj_pool_t *pool,
-				       char *buf, pj_size_t len, 
+PJ_DEF(pj_status_t) pjmedia_sdp_parse( int inst_id,
+					   pj_pool_t *pool,
+				       char **buf, pj_size_t *len, 
 				       pjmedia_sdp_session **p_sdp)
 {
     pj_scanner scanner;
@@ -1183,13 +1189,24 @@ PJ_DEF(pj_status_t) pjmedia_sdp_parse( pj_pool_t *pool,
     pj_str_t dummy;
     int cur_name = 254;
     parse_context ctx;
-    PJ_USE_EXCEPTION;
+	PJ_USE_EXCEPTION;
+	char sdp_buf[4000];
+	int ret, sdp_len = sizeof(sdp_buf);
+
+	// 2013-03-12 DEAN, decompress sdp
+	ret = BZ2_bzBuffToBuffDecompress(sdp_buf, &sdp_len, *buf, *len, 1, 0);
+		if (ret == BZ_OK) {
+		*buf = (char *)pj_pool_alloc(pool, sdp_len);
+		*len = sdp_len;
+		memcpy(*buf, sdp_buf, sdp_len);
+	}
+	PJ_LOG(4, ("sdp.c", "pjmedia_sdp_parse() %.*s", *len, *buf));
 
     ctx.last_error = PJ_SUCCESS;
 
-    init_sdp_parser();
+    init_sdp_parser(inst_id);
 
-    pj_scan_init(&scanner, buf, len, 0, &on_scanner_error);
+    pj_scan_init(inst_id, &scanner, *buf, *len, 0, &on_scanner_error);
     session = PJ_POOL_ZALLOC_T(pool, pjmedia_sdp_session);
     PJ_ASSERT_RETURN(session != NULL, PJ_ENOMEM);
 
@@ -1197,7 +1214,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_parse( pj_pool_t *pool,
     while (*scanner.curptr=='\r' || *scanner.curptr=='\n')
 	pj_scan_get_char(&scanner);
 
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	while (!pj_scan_is_eof(&scanner)) {
 		cur_name = *scanner.curptr;
 		switch (cur_name) {
@@ -1280,7 +1297,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_parse( pj_pool_t *pool,
 
 	pj_assert(ctx.last_error != PJ_SUCCESS);
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     pj_scan_fini(&scanner);
 
@@ -1292,12 +1309,27 @@ PJ_DEF(pj_status_t) pjmedia_sdp_parse( pj_pool_t *pool,
 }
 
 /*
- * Print SDP description.
+ * Print SDP description
  */
 PJ_DEF(int) pjmedia_sdp_print( const pjmedia_sdp_session *desc, 
 			       char *buf, pj_size_t size)
 {
-    return print_session(desc, buf, size);
+
+	if (!desc->disable_compress) {
+		int ret;
+		ret = print_session(desc, buf, size);
+		if (ret > 0)
+			PJ_LOG(4, ("sdp.c", "pjmedia_sdp_print() %.*s", ret, buf));
+
+		// 2013-03-12 DEAN, compress sdp
+		ret = BZ2_bzBuffToBuffCompress(buf, &size, buf, ret, 9, 0, 0);
+		if (ret == BZ_OK) {
+			return size;
+		} else {
+			return print_session(desc, buf, size);
+		}
+	} else
+		return print_session(desc, buf, size);
 }
 
 
@@ -1346,7 +1378,10 @@ PJ_DEF(pjmedia_sdp_session*) pjmedia_sdp_session_clone( pj_pool_t *pool,
     sess->media_count = rhs->media_count;
     for (i=0; i<rhs->media_count; ++i) {
 	sess->media[i] = pjmedia_sdp_media_clone(pool, rhs->media[i]);
-    }
+	}
+
+	/* DEAN assign disable compress*/
+	sess->disable_compress = rhs->disable_compress;
 
     return sess;
 }
@@ -1437,12 +1472,12 @@ PJ_DEF(pj_status_t) pjmedia_sdp_validate(const pjmedia_sdp_session *sdp)
 
 		/* Payload type is between 0 and 127. 
 		 */
-		CHECK( pt <= 127, PJMEDIA_SDP_EINPT);
+		CHECK( pt <= 127 || pt >= 5000, PJMEDIA_SDP_EINPT); // dean : 5000 is WebRTC data channel
 
 		/* If port is not zero, then for each dynamic payload type, an
 		 * rtpmap attribute must be specified.
 		 */
-		if (m->desc.port != 0 && pt >= 96) {
+		if (m->desc.port != 0 && pt >= 96 && pt <= 127) { // dean : There is no rtpmap for WebRTC data channel.
 		    const pjmedia_sdp_attr *a;
 
 		    a = pjmedia_sdp_media_find_attr(m, &STR_RTPMAP, 
@@ -1460,16 +1495,18 @@ PJ_DEF(pj_status_t) pjmedia_sdp_validate(const pjmedia_sdp_session *sdp)
 PJ_DEF(pj_status_t) pjmedia_sdp_transport_cmp( const pj_str_t *t1,
 					       const pj_str_t *t2)
 {
-    static const pj_str_t ID_RTP_AVP  = { "RTP/AVP", 7 };
-    static const pj_str_t ID_RTP_SAVP = { "RTP/SAVP", 8 };
+	static const pj_str_t ID_RTP_AVP  = { "RTP/AVP", 7 };
+	static const pj_str_t ID_RTP_SAVP = { "RTP/SAVP", 8 };
+	static const pj_str_t ID_DTLS_SCTP = { "DTLS/SCTP", 9 }; // dean : DTLS/SCTP is for WebRTC data channel
+	static const pj_str_t ID_RTP_SCTP = { "RTP/SCTP", 8 }; // dean : RTP/SCTP is for UDT replacement
 
     /* Exactly equal? */
     if (pj_stricmp(t1, t2) == 0)
 	return PJ_SUCCESS;
 
     /* Compatible? */
-    if ((!pj_stricmp(t1, &ID_RTP_AVP) || !pj_stricmp(t1, &ID_RTP_SAVP)) &&
-        (!pj_stricmp(t2, &ID_RTP_AVP) || !pj_stricmp(t2, &ID_RTP_SAVP)))
+	if ((!pj_stricmp(t1, &ID_RTP_AVP) || !pj_stricmp(t1, &ID_RTP_SAVP) || !pj_stricmp(t1, &ID_DTLS_SCTP) || !pj_stricmp(t1, &ID_RTP_SCTP)) &&
+		(!pj_stricmp(t2, &ID_RTP_AVP) || !pj_stricmp(t2, &ID_RTP_SAVP) || !pj_stricmp(t2, &ID_DTLS_SCTP) || !pj_stricmp(t2, &ID_RTP_SCTP)))
 	return PJ_SUCCESS;
 
     return PJMEDIA_SDP_ETPORTNOTEQUAL;

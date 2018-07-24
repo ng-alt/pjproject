@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sock_symbian.cpp 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -486,7 +486,7 @@ PJ_DEF(pj_status_t) pj_sock_socket(int af,
 {
     TInt rc;
 
-    PJ_CHECK_STACK();
+    PJ_CHECK_STACK();    
 
     /* Sanity checks. */
     PJ_ASSERT_RETURN(p_sock!=NULL, PJ_EINVAL);

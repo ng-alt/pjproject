@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: latency.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -154,12 +154,12 @@ int main(int argc, char *argv[])
 	return 1;
     }
 
-    pj_log_set_level(0);
+    pj_log_set_level(0, 0);
 
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
-    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &cp, &pj_pool_factory_default_policy, 0);
 
     pool = pj_pool_create( &cp.factory,	    /* pool factory	    */
 			   "wav",	    /* pool name.	    */
@@ -194,7 +194,7 @@ int main(int argc, char *argv[])
 
     pj_pool_release( pool );
     pj_caching_pool_destroy( &cp );
-    pj_shutdown();
+    pj_shutdown(0);
 
     /* Done. */
     return 0;

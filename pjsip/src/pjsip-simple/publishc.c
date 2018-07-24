@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: publishc.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -158,8 +158,12 @@ PJ_DEF(pj_status_t) pjsip_publishc_create( pjsip_endpoint *endpt,
     pjsip_publishc_opt default_opt;
     pj_status_t status;
 
+	int inst_id;
+
     /* Verify arguments. */
     PJ_ASSERT_RETURN(endpt && cb && p_pubc, PJ_EINVAL);
+
+	inst_id = pjsip_endpt_get_inst_id(endpt);
 
     pool = pjsip_endpt_create_pool(endpt, "pubc%p", 1024, 1024);
     PJ_ASSERT_RETURN(pool != NULL, PJ_ENOMEM);
@@ -241,7 +245,8 @@ static void set_expires( pjsip_publishc *pubc, pj_uint32_t expires)
 }
 
 
-PJ_DEF(pj_status_t) pjsip_publishc_init(pjsip_publishc *pubc,
+PJ_DEF(pj_status_t) pjsip_publishc_init(int inst_id,
+					pjsip_publishc *pubc,
 					const pj_str_t *event,
 					const pj_str_t *target_uri,
 					const pj_str_t *from_uri,
@@ -261,7 +266,7 @@ PJ_DEF(pj_status_t) pjsip_publishc_init(pjsip_publishc *pubc,
 
     /* Set server URL. */
     tmp = pubc->str_target_uri;
-    pubc->target_uri = pjsip_parse_uri( pubc->pool, tmp.ptr, tmp.slen, 0);
+    pubc->target_uri = pjsip_parse_uri( inst_id, pubc->pool, tmp.ptr, tmp.slen, 0);
     if (pubc->target_uri == NULL) {
 	return PJSIP_EINVALIDURI;
     }
@@ -270,7 +275,7 @@ PJ_DEF(pj_status_t) pjsip_publishc_init(pjsip_publishc *pubc,
     pj_strdup_with_null(pubc->pool, &pubc->from_uri, from_uri);
     tmp = pubc->from_uri;
     pubc->from_hdr = pjsip_from_hdr_create(pubc->pool);
-    pubc->from_hdr->uri = pjsip_parse_uri(pubc->pool, tmp.ptr, tmp.slen, 
+    pubc->from_hdr->uri = pjsip_parse_uri(inst_id, pubc->pool, tmp.ptr, tmp.slen, 
 					  PJSIP_PARSE_URI_AS_NAMEADDR);
     if (!pubc->from_hdr->uri) {
 	return PJSIP_EINVALIDURI;
@@ -279,7 +284,7 @@ PJ_DEF(pj_status_t) pjsip_publishc_init(pjsip_publishc *pubc,
     /* Set "To" header. */
     pj_strdup_with_null(pubc->pool, &tmp, to_uri);
     pubc->to_hdr = pjsip_to_hdr_create(pubc->pool);
-    pubc->to_hdr->uri = pjsip_parse_uri(pubc->pool, tmp.ptr, tmp.slen, 
+    pubc->to_hdr->uri = pjsip_parse_uri(inst_id, pubc->pool, tmp.ptr, tmp.slen, 
 					PJSIP_PARSE_URI_AS_NAMEADDR);
     if (!pubc->to_hdr->uri) {
 	return PJSIP_EINVALIDURI;

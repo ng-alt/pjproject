@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: types.h 3987 2012-03-23 08:24:58Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -123,6 +123,9 @@ struct pj_str_t
  * values represent time in cycles, which is retrieved by calling
  * #pj_get_timestamp().
  */
+//charles debug
+#pragma pack(1)
+//charles debug
 typedef union pj_timestamp
 {
     struct
@@ -174,7 +177,9 @@ typedef struct pj_hash_iterator_t
     pj_uint32_t	     index;     /**< Internal index.     */
     pj_hash_entry   *entry;     /**< Internal entry.     */
 } pj_hash_iterator_t;
-
+//charles debug
+#pragma pack()
+//charles debug
 
 /**
  * Forward declaration for memory pool factory.
@@ -213,11 +218,6 @@ typedef struct pj_ioqueue_key_t pj_ioqueue_key_t;
  */
 typedef struct pj_timer_heap_t pj_timer_heap_t;
 
-/**
- * Forward declaration for timer entry.
- */
-typedef struct pj_timer_entry pj_timer_entry;
-
 /** 
  * Opaque data type for atomic operations.
  */
@@ -236,6 +236,9 @@ typedef struct pj_thread_t pj_thread_t;
 /** Lock object. */
 typedef struct pj_lock_t pj_lock_t;
 
+/** Group lock */
+typedef struct pj_grp_lock_t pj_grp_lock_t;
+
 /** Mutex handle. */
 typedef struct pj_mutex_t pj_mutex_t;
 
@@ -252,7 +255,11 @@ typedef struct pj_pipe_t pj_pipe_t;
 typedef void *pj_oshandle_t;
 
 /** Socket handle. */
+#if defined(PJ_WIN64) && PJ_WIN64!=0
+typedef pj_int64_t pj_sock_t;
+#else
 typedef long pj_sock_t;
+#endif
 
 /** Generic socket address. */
 typedef void pj_sockaddr_t;
@@ -290,30 +297,35 @@ typedef int pj_exception_id_t;
  * in random string generation, and to initialize operating system dependent
  * functionality (such as WSAStartup() in Windows).
  *
+ * Apart from calling pj_init(), application typically should also initialize
+ * the random seed by calling pj_srand().
+ *
+ * @param inst_id  The instance id of pjsua.
  * @return PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pj_init(void);
+PJ_DECL(pj_status_t) pj_init(int inst_id);
 
 
 /**
  * Shutdown PJLIB.
  */
-PJ_DECL(void) pj_shutdown(void);
+PJ_DECL(void) pj_shutdown(int inst_id);
 
 /**
  * Type of callback to register to pj_atexit().
  */
-typedef void (*pj_exit_callback)(void);
+typedef void (*pj_exit_callback)(int inst_id);
 
 /**
  * Register cleanup function to be called by PJLIB when pj_shutdown() is 
  * called.
  *
+ * @param inst_id	The instance id of pjsua.
  * @param func	    The function to be registered.
  *
  * @return PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pj_atexit(pj_exit_callback func);
+PJ_DECL(pj_status_t) pj_atexit(int inst_id, pj_exit_callback func);
 
 
 
@@ -376,6 +388,15 @@ typedef struct pj_time_val
     long    msec;
 
 } pj_time_val;
+
+typedef struct pj_time_val2
+{
+    /** The seconds part of the time. */
+    long    sec;
+
+    /** The microseconds fraction of the time. */
+    long    usec;
+} pj_time_val2;
 
 /**
  * Normalize the value in time value.

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: resolver.c 4397 2013-02-27 13:44:48Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -163,6 +163,8 @@ struct cached_res
 /* Resolver entry */
 struct pj_dns_resolver
 {
+	int inst_id;
+
     pj_str_t		 name;		/**< Resolver instance name for id. */
 
     /* Internals */
@@ -180,7 +182,8 @@ struct pj_dns_resolver
     unsigned char	 udp_rx_pkt[UDPSZ];/**< UDP receive buffer.	    */
     unsigned char	 udp_tx_pkt[UDPSZ];/**< UDP receive buffer.	    */
     pj_ssize_t		 udp_len;	/**< Length of received packet.	    */
-    pj_ioqueue_op_key_t	 udp_op_key;	/**< UDP read operation key.	    */
+    pj_ioqueue_op_key_t	 udp_op_rx_key;	/**< UDP read operation key.	    */
+    pj_ioqueue_op_key_t	 udp_op_tx_key;	/**< UDP write operation key.	    */
     pj_sockaddr_in	 udp_src_addr;	/**< Source address of packet	    */
     int			 udp_addr_len;	/**< Source address length.	    */
 
@@ -223,6 +226,63 @@ static pj_status_t select_nameservers(pj_dns_resolver *resolver,
 				      unsigned servers[]);
 
 
+/* Close UDP socket */
+static void close_sock(pj_dns_resolver *resv)
+{
+    /* Close existing socket */
+    if (resv->udp_key != NULL) {
+	pj_ioqueue_unregister(resv->udp_key);
+	resv->udp_key = NULL;
+	resv->udp_sock = PJ_INVALID_SOCKET;
+    } else if (resv->udp_sock != PJ_INVALID_SOCKET) {
+	pj_sock_close(resv->udp_sock);
+	resv->udp_sock = PJ_INVALID_SOCKET;
+    }
+}
+
+
+/* Initialize UDP socket */
+static pj_status_t init_sock(pj_dns_resolver *resv)
+{
+    pj_ioqueue_callback socket_cb;
+    pj_status_t status;
+
+    /* Create the UDP socket */
+    status = pj_sock_socket(pj_AF_INET(), pj_SOCK_DGRAM(), 0, &resv->udp_sock);
+    if (status != PJ_SUCCESS)
+	return status;
+
+    /* Bind to any address/port */
+    status = pj_sock_bind_in(resv->udp_sock, 0, 0);
+    if (status != PJ_SUCCESS)
+	return status;
+
+    /* Register to ioqueue */
+    pj_bzero(&socket_cb, sizeof(socket_cb));
+    socket_cb.on_read_complete = &on_read_complete;
+    status = pj_ioqueue_register_sock(resv->pool, resv->ioqueue,
+				      resv->udp_sock, resv, &socket_cb,
+				      &resv->udp_key);
+    if (status != PJ_SUCCESS)
+	return status;
+
+    pj_ioqueue_op_key_init(&resv->udp_op_rx_key, sizeof(resv->udp_op_rx_key));
+    pj_ioqueue_op_key_init(&resv->udp_op_tx_key, sizeof(resv->udp_op_tx_key));
+
+    /* Start asynchronous read to the UDP socket */
+    resv->udp_len = sizeof(resv->udp_rx_pkt);
+    resv->udp_addr_len = sizeof(resv->udp_src_addr);
+    status = pj_ioqueue_recvfrom(resv->udp_key, &resv->udp_op_rx_key,
+				 resv->udp_rx_pkt, &resv->udp_len,
+				 PJ_IOQUEUE_ALWAYS_ASYNC,
+				 &resv->udp_src_addr, &resv->udp_addr_len);
+    if (status != PJ_EPENDING)
+	return status;
+
+    return PJ_SUCCESS;
+}
+
+
 /* Initialize DNS settings with default values */
 PJ_DEF(void) pj_dns_settings_default(pj_dns_settings *s)
 {
@@ -238,7 +298,7 @@ PJ_DEF(void) pj_dns_settings_default(pj_dns_settings *s)
 /*
  * Create the resolver.
  */
-PJ_DEF(pj_status_t) pj_dns_resolver_create( pj_pool_factory *pf,
+PJ_DEF(pj_status_t) pj_dns_resolver_create(pj_pool_factory *pf,
 					    const char *name,
 					    unsigned options,
 					    pj_timer_heap_t *timer,
@@ -247,7 +307,6 @@ PJ_DEF(pj_status_t) pj_dns_resolver_create( pj_pool_factory *pf,
 {
     pj_pool_t *pool;
     pj_dns_resolver *resv;
-    pj_ioqueue_callback socket_cb;
     pj_status_t status;
 
     /* Sanity check */
@@ -301,37 +360,12 @@ PJ_DEF(pj_status_t) pj_dns_resolver_create( pj_pool_factory *pf,
     resv->hquerybyid = pj_hash_create(pool, Q_HASH_TABLE_SIZE);
     resv->hquerybyres = pj_hash_create(pool, Q_HASH_TABLE_SIZE);
     pj_list_init(&resv->query_free_nodes);
+	resv->inst_id = pf->inst_id;
 
-    /* Create the UDP socket */
-    status = pj_sock_socket(pj_AF_INET(), pj_SOCK_DGRAM(), 0, &resv->udp_sock);
+    /* Initialize the UDP socket */
+    status = init_sock(resv);
     if (status != PJ_SUCCESS)
 	goto on_error;
-
-    /* Bind to any address/port */
-    status = pj_sock_bind_in(resv->udp_sock, 0, 0);
-    if (status != PJ_SUCCESS)
-	goto on_error;
-
-    /* Register to ioqueue */
-    pj_bzero(&socket_cb, sizeof(socket_cb));
-    socket_cb.on_read_complete = &on_read_complete;
-    status = pj_ioqueue_register_sock(pool, resv->ioqueue, resv->udp_sock,
-				      resv, &socket_cb, &resv->udp_key);
-    if (status != PJ_SUCCESS)
-	goto on_error;
-
-    pj_ioqueue_op_key_init(&resv->udp_op_key, sizeof(resv->udp_op_key));
-
-    /* Start asynchronous read to the UDP socket */
-    resv->udp_len = sizeof(resv->udp_rx_pkt);
-    resv->udp_addr_len = sizeof(resv->udp_src_addr);
-    status = pj_ioqueue_recvfrom(resv->udp_key, &resv->udp_op_key, 
-				 resv->udp_rx_pkt, &resv->udp_len, 
-				 PJ_IOQUEUE_ALWAYS_ASYNC,
-				 &resv->udp_src_addr, &resv->udp_addr_len);
-    if (status != PJ_EPENDING)
-	goto on_error;
-
 
     /* Looks like everything is okay */
     *p_resolver = resv;
@@ -392,14 +426,7 @@ PJ_DEF(pj_status_t) pj_dns_resolver_destroy( pj_dns_resolver *resolver,
 	resolver->timer = NULL;
     }
 
-    if (resolver->udp_key != NULL) {
-	pj_ioqueue_unregister(resolver->udp_key);
-	resolver->udp_key = NULL;
-	resolver->udp_sock = PJ_INVALID_SOCKET;
-    } else if (resolver->udp_sock != PJ_INVALID_SOCKET) {
-	pj_sock_close(resolver->udp_sock);
-	resolver->udp_sock = PJ_INVALID_SOCKET;
-    }
+    close_sock(resolver);
 
     if (resolver->own_ioqueue && resolver->ioqueue) {
 	pj_ioqueue_destroy(resolver->ioqueue);
@@ -561,15 +588,6 @@ static pj_status_t transmit_query(pj_dns_resolver *resolver,
     pj_time_val delay;
     pj_status_t status;
 
-    /* Create DNS query packet */
-    pkt_size = sizeof(resolver->udp_tx_pkt);
-    name = pj_str(q->key.name);
-    status = pj_dns_make_query(resolver->udp_tx_pkt, &pkt_size, 
-			       q->id, q->key.qtype, &name);
-    if (status != PJ_SUCCESS) {
-	return status;
-    }
-
     /* Select which nameserver(s) to send requests to. */
     server_cnt = PJ_ARRAY_SIZE(servers);
     status = select_nameservers(resolver, &server_cnt, servers);
@@ -595,6 +613,28 @@ static pj_status_t transmit_query(pj_dns_resolver *resolver,
 	return status;
     }
 
+    /* Check if the socket is available for sending */
+    if (pj_ioqueue_is_pending(resolver->udp_key, &resolver->udp_op_tx_key)) {
+	++q->transmit_cnt;
+	PJ_LOG(4,(resolver->name.ptr,
+		  "Socket busy in transmitting DNS %s query for %s%s",
+		  pj_dns_get_type_name(q->key.qtype),
+		  q->key.name,
+		  (q->transmit_cnt < resolver->settings.qretr_count?
+		   ", will try again later":"")));
+	return PJ_SUCCESS;
+    }
+
+    /* Create DNS query packet */
+    pkt_size = sizeof(resolver->udp_tx_pkt);
+    name = pj_str(q->key.name);
+    status = pj_dns_make_query(resolver->udp_tx_pkt, &pkt_size,
+			       q->id, q->key.qtype, &name);
+    if (status != PJ_SUCCESS) {
+	pj_timer_heap_cancel(resolver->timer, &q->timer_entry);
+	return status;
+    }
+
     /* Get current time. */
     pj_gettimeofday(&now);
 
@@ -603,13 +643,16 @@ static pj_status_t transmit_query(pj_dns_resolver *resolver,
 	pj_ssize_t sent  = (pj_ssize_t) pkt_size;
 	struct nameserver *ns = &resolver->ns[servers[i]];
 
-	pj_sock_sendto(resolver->udp_sock, resolver->udp_tx_pkt, &sent, 0,
-		       &resolver->ns[servers[i]].addr, sizeof(pj_sockaddr_in));
+	status = pj_ioqueue_sendto(resolver->udp_key,
+				   &resolver->udp_op_tx_key,
+				   resolver->udp_tx_pkt, &sent, 0,
+				   &resolver->ns[servers[i]].addr,
+				   sizeof(pj_sockaddr_in));
 
-	PJ_LOG(4,(resolver->name.ptr, 
+	PJ_PERROR(4,(resolver->name.ptr, status,
 		  "%s %d bytes to NS %d (%s:%d): DNS %s query for %s",
 		  (q->transmit_cnt==0? "Transmitting":"Re-transmitting"),
-		  (int)sent, servers[i],
+		  (int)pkt_size, servers[i],
 		  pj_inet_ntoa(ns->addr.sin_addr), 
 		  (int)pj_ntohs(ns->addr.sin_port),
 		  pj_dns_get_type_name(q->key.qtype), 
@@ -1248,6 +1291,9 @@ static void on_timeout( pj_timer_heap_t *timer_heap,
     pj_hash_set(NULL, resolver->hquerybyid, &q->id, sizeof(q->id), 0, NULL);
     pj_hash_set(NULL, resolver->hquerybyres, &q->key, sizeof(q->key), 0, NULL);
 
+    /* Workaround for deadlock problem in #1565 (similar to #1108) */ 
+    pj_mutex_unlock(resolver->mutex); 
+
     /* Call application callback, if any. */
     if (q->cb)
 	(*q->cb)(q->user_data, PJ_ETIMEDOUT, NULL);
@@ -1259,6 +1305,9 @@ static void on_timeout( pj_timer_heap_t *timer_heap,
 	    (*cq->cb)(cq->user_data, PJ_ETIMEDOUT, NULL);
 	cq = cq->next;
     }
+
+    /* Workaround for deadlock problem in #1565 (similar to #1108) */ 
+    pj_mutex_lock(resolver->mutex); 
 
     /* Clear data */
     q->timer_entry.id = 0;
@@ -1323,20 +1372,21 @@ static void on_read_complete(pj_ioqueue_key_t *key,
 	goto read_next_packet;
 
     /* Create temporary pool from a fixed buffer */
-    pool = pj_pool_create_on_buf("restmp", resolver->tmp_pool, 
+    pool = pj_pool_create_on_buf(resolver->inst_id,
+				"restmp", resolver->tmp_pool, 
 				 sizeof(resolver->tmp_pool));
 
     /* Parse DNS response */
     status = -1;
     dns_pkt = NULL;
-    PJ_TRY {
+    PJ_TRY(resolver->inst_id) {
 	status = pj_dns_parse_packet(pool, resolver->udp_rx_pkt, 
 				     (unsigned)bytes_read, &dns_pkt);
     }
     PJ_CATCH_ANY {
 	status = PJ_ENOMEM;
     }
-    PJ_END;
+    PJ_END(resolver->inst_id);
 
     /* Update nameserver status */
     report_nameserver_status(resolver, &resolver->udp_src_addr, dns_pkt);

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_regc.h 4037 2012-04-11 09:41:25Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -161,6 +161,7 @@ PJ_DECL(pj_pool_t*) pjsip_regc_get_pool(pjsip_regc *regc);
  * Initialize client registration structure with various information needed to
  * perform the registration.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param regc	    The client registration structure.
  * @param srv_url   Server URL.
  * @param from_url  The person performing the registration, must be a SIP URL type.
@@ -182,7 +183,8 @@ PJ_DECL(pj_pool_t*) pjsip_regc_get_pool(pjsip_regc *regc);
  *		    no default expiration will be applied.
  * @return	    zero on success.
  */
-PJ_DECL(pj_status_t) pjsip_regc_init(pjsip_regc *regc,
+PJ_DECL(pj_status_t) pjsip_regc_init(int inst_id,
+					 pjsip_regc *regc,
 				     const pj_str_t *srv_url,
 				     const pj_str_t *from_url,
 				     const pj_str_t *to_url,
@@ -265,6 +267,19 @@ PJ_DECL(pj_status_t) pjsip_regc_set_route_set(pjsip_regc *regc,
 PJ_DECL(pj_status_t) pjsip_regc_set_transport(pjsip_regc *regc,
 					      const pjsip_tpselector *sel);
 
+/**
+ * Release the reference to current transport being used by the regc, if any.
+ * The regc keeps the reference to the last transport being used in order
+ * to prevent it from being destroyed. In some situation however, such as
+ * when the transport is disconnected, it is necessary to instruct the
+ * regc to release this reference so that the transport can be destroyed.
+ * See https://trac.pjsip.org/repos/ticket/1481 for background info.
+ *
+ * @param regc	    The client registration instance.
+ *
+ * @return	    PJ_SUCCESS on success, or the appropriate error code.
+ */
+PJ_DECL(pj_status_t) pjsip_regc_release_transport(pjsip_regc *regc);
 
 /**
  * Add headers to be added to outgoing REGISTER requests.
@@ -338,6 +353,7 @@ PJ_DECL(pj_status_t) pjsip_regc_unregister_all(pjsip_regc *regc,
  * old contacts will have it's expires parameter set to zero to instruct
  * the registrar to remove the bindings.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param regc	    The client registration structure.
  * @param ccnt	    Number of contacts.
  * @param contact   Array of contacts, each contact item must be formatted
@@ -351,8 +367,9 @@ PJ_DECL(pj_status_t) pjsip_regc_unregister_all(pjsip_regc *regc,
  *		    character set is desired.
  * @return	    PJ_SUCCESS if sucessfull.
  */
-PJ_DECL(pj_status_t) pjsip_regc_update_contact( pjsip_regc *regc,
-					        int ccnt,
+PJ_DECL(pj_status_t) pjsip_regc_update_contact( int inst_id,
+						pjsip_regc *regc,
+					    int ccnt,
 						const pj_str_t contact[] );
 
 /**

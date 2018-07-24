@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: httpdemo.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -124,7 +124,7 @@ pj_status_t getURL(const char *curl)
 
     pj_strdup2(pool, &url, curl);
 
-    if ((status = pj_http_req_create(pool, &url, timer_heap, ioqueue, 
+    if ((status = pj_http_req_create(0, pool, &url, timer_heap, ioqueue,
                            NULL, &hcb, &http_req)) != PJ_SUCCESS)
         return status;
 
@@ -157,10 +157,10 @@ int main(int argc, char *argv[])
 	return 1;
     }
 
-    pj_log_set_level(5);
+    pj_log_set_level(0, 5);
 
-    pj_init();
-    pj_caching_pool_init(&cp, NULL, 0);
+    pj_init(0);
+    pj_caching_pool_init(0, &cp, NULL, 0);
     mem = &cp.factory;
     pjlib_util_init();
 
@@ -178,6 +178,6 @@ int main(int argc, char *argv[])
 	fclose(f);
 
     pj_caching_pool_destroy(&cp);
-    pj_shutdown();
+    pj_shutdown(0);
     return 0;
 }

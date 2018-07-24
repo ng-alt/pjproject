@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pcap.c 3588 2011-06-20 03:54:49Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -122,7 +122,7 @@ PJ_DEF(pj_status_t) pj_pcap_open(pj_pool_t *pool,
 
     pj_ansi_strcpy(file->obj_name, "pcap");
 
-    status = pj_file_open(pool, path, PJ_O_RDONLY, &file->fd);
+    status = pj_file_open(pool, path, PJ_O_RDONLY, &file->fd, NULL);
     if (status != PJ_SUCCESS)
 	return status;
 

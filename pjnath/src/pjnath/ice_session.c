@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ice_session.c 4407 2013-02-27 15:02:03Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -17,6 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
+#include <pjnath//natnl_tnl_cache.h>
 #include <pjnath/ice_session.h>
 #include <pj/addr_resolv.h>
 #include <pj/array.h>
@@ -28,6 +29,11 @@
 #include <pj/pool.h>
 #include <pj/rand.h>
 #include <pj/string.h>
+#include <pjnath/ice_strans.h>
+//charles fixed unix-like os x64 segmentation fault
+#include <pjnath/stun_session.h>
+
+#define THIS_FILE "ice_sesison.c"
 
 /* String names for candidate types */
 static const char *cand_type_names[] =
@@ -35,8 +41,10 @@ static const char *cand_type_names[] =
     "host",
     "srflx",
     "prflx",
-    "relay"
-
+	"relay",
+	"host",
+	"srflx",
+	"relay",
 };
 
 /* String names for pj_ice_sess_check_state */
@@ -75,25 +83,29 @@ enum timer_type
 				     valid check for every components.	*/
     TIMER_START_NOMINATED_CHECK,/**< Controlling agent start connectivity
 				     checks with USE-CANDIDATE flag.	*/
-    TIMER_KEEP_ALIVE		/**< ICE keep-alive timer.		*/
+    TIMER_KEEP_ALIVE,		/**< ICE keep-alive timer.		*/
+    //TIMER_TIMEOUT_TO_RECV_KEEP_ALIVE		/**< ICE keep-alive timer.		*/ // DEAN Discard this
 
 };
 
 /* Candidate type preference */
-static pj_uint8_t cand_type_prefs[4] =
+static pj_uint8_t cand_type_prefs[7] =
 {
 #if PJ_ICE_CAND_TYPE_PREF_BITS < 8
     /* Keep it to 2 bits */
     3,	    /**< PJ_ICE_HOST_PREF	*/
     1,	    /**< PJ_ICE_SRFLX_PREF.	*/
-    2,	    /**< PJ_ICE_PRFLX_PREF	*/
-    0	    /**< PJ_ICE_RELAYED_PREF	*/
+	2,	    /**< PJ_ICE_PRFLX_PREF	*/
+	0	    /**< PJ_ICE_RELAYED_PREF	*/
 #else
     /* Default ICE session preferences, according to draft-ice */
     126,    /**< PJ_ICE_HOST_PREF	*/
     100,    /**< PJ_ICE_SRFLX_PREF.	*/
-    110,    /**< PJ_ICE_PRFLX_PREF	*/
-    0	    /**< PJ_ICE_RELAYED_PREF	*/
+	110,    /**< PJ_ICE_PRFLX_PREF	*/
+	0,	    /**< PJ_ICE_RELAYED_PREF	*/
+	126,	/**< PJ_ICE_HOST_TCP_PREF	*/
+	126,	    /**< PJ_ICE_SRFLX_TCP_PREF	*/
+	0,	    /**< PJ_ICE_RELAYED_TCP_PREF	*/
 #endif
 };
 
@@ -122,6 +134,7 @@ typedef struct timer_data
 {
     pj_ice_sess		    *ice;
     pj_ice_sess_checklist   *clist;
+	pj_tcp_session *tcp_sesses[2];
 } timer_data;
 
 
@@ -134,6 +147,7 @@ typedef struct timer_data
 static void on_timer(pj_timer_heap_t *th, pj_timer_entry *te);
 static void on_ice_complete(pj_ice_sess *ice, pj_status_t status);
 static void ice_keep_alive(pj_ice_sess *ice, pj_bool_t send_now);
+static void ice_on_destroy(void *obj);
 static void destroy_ice(pj_ice_sess *ice,
 			pj_status_t reason);
 static pj_status_t start_periodic_check(pj_timer_heap_t *th, 
@@ -143,6 +157,8 @@ static void periodic_timer(pj_timer_heap_t *th,
 			  pj_timer_entry *te);
 static void handle_incoming_check(pj_ice_sess *ice,
 				  const pj_ice_rx_check *rcheck);
+static void update_comp_check(pj_ice_sess *ice, unsigned comp_id, 
+			      pj_ice_sess_check *check);
 
 /* These are the callbacks registered to the STUN sessions */
 static pj_status_t on_stun_send_msg(pj_stun_session *sess,
@@ -151,21 +167,21 @@ static pj_status_t on_stun_send_msg(pj_stun_session *sess,
 				    pj_size_t pkt_size,
 				    const pj_sockaddr_t *dst_addr,
 				    unsigned addr_len);
-static pj_status_t on_stun_rx_request(pj_stun_session *sess,
+pj_status_t on_stun_rx_request(pj_stun_session *sess,
 				      const pj_uint8_t *pkt,
 				      unsigned pkt_len,
 				      const pj_stun_rx_data *rdata,
 				      void *token,
 				      const pj_sockaddr_t *src_addr,
 				      unsigned src_addr_len);
-static void on_stun_request_complete(pj_stun_session *stun_sess,
+void on_stun_request_complete(pj_stun_session *stun_sess,
 				     pj_status_t status,
 				     void *token,
 				     pj_stun_tx_data *tdata,
 				     const pj_stun_msg *response,
 				     const pj_sockaddr_t *src_addr,
 				     unsigned src_addr_len);
-static pj_status_t on_stun_rx_indication(pj_stun_session *sess,
+pj_status_t on_stun_rx_indication(pj_stun_session *sess,
 					 const pj_uint8_t *pkt,
 					 unsigned pkt_len,
 					 const pj_stun_msg *msg,
@@ -197,7 +213,7 @@ static pj_status_t stun_auth_get_password(const pj_stun_msg *msg,
 
 PJ_DEF(const char*) pj_ice_get_cand_type_name(pj_ice_cand_type type)
 {
-    PJ_ASSERT_RETURN(type <= PJ_ICE_CAND_TYPE_RELAYED, "???");
+    PJ_ASSERT_RETURN(type <= PJ_ICE_CAND_TYPE_RELAYED_TCP, "???");
     return cand_type_names[type];
 }
 
@@ -223,8 +239,11 @@ static int get_type_prefix(pj_ice_cand_type type)
     switch (type) {
     case PJ_ICE_CAND_TYPE_HOST:	    return 'H';
     case PJ_ICE_CAND_TYPE_SRFLX:    return 'S';
-    case PJ_ICE_CAND_TYPE_PRFLX:    return 'P';
-    case PJ_ICE_CAND_TYPE_RELAYED:  return 'R';
+	case PJ_ICE_CAND_TYPE_PRFLX:    return 'P';
+	case PJ_ICE_CAND_TYPE_RELAYED:  return 'R';
+	case PJ_ICE_CAND_TYPE_HOST_TCP:  return 'T';
+	case PJ_ICE_CAND_TYPE_SRFLX_TCP:  return 'X';
+	case PJ_ICE_CAND_TYPE_RELAYED_TCP:  return 'L';
     default:
 	pj_assert(!"Invalid type");
 	return 'U';
@@ -288,6 +307,7 @@ static pj_status_t init_comp(pj_ice_sess *ice,
     /* Create STUN session for this candidate */
     status = pj_stun_session_create(&ice->stun_cfg, NULL, 
 			            &sess_cb, PJ_TRUE,
+			            ice->grp_lock,
 				    &comp->stun_sess);
     if (status != PJ_SUCCESS)
 	return status;
@@ -316,7 +336,7 @@ static pj_status_t init_comp(pj_ice_sess *ice,
 /* Init options with default values */
 PJ_DEF(void) pj_ice_sess_options_default(pj_ice_sess_options *opt)
 {
-    opt->aggressive = PJ_TRUE;
+    opt->aggressive = PJ_FALSE; // natnl
     opt->nominated_check_delay = PJ_ICE_NOMINATED_CHECK_DELAY;
     opt->controlled_agent_want_nom_timeout = 
 	ICE_CONTROLLED_AGENT_WAIT_NOMINATION_TIMEOUT;
@@ -332,7 +352,9 @@ PJ_DEF(pj_status_t) pj_ice_sess_create(pj_stun_config *stun_cfg,
 				       const pj_ice_sess_cb *cb,
 				       const pj_str_t *local_ufrag,
 				       const pj_str_t *local_passwd,
-				       pj_ice_sess **p_ice)
+				       pj_grp_lock_t *grp_lock,
+				       pj_ice_sess **p_ice,
+					   int tnl_timeout_msec)
 {
     pj_pool_t *pool;
     pj_ice_sess *ice;
@@ -359,12 +381,19 @@ PJ_DEF(pj_status_t) pj_ice_sess_create(pj_stun_config *stun_cfg,
     pj_ansi_snprintf(ice->obj_name, sizeof(ice->obj_name),
 		     name, ice);
 
-    status = pj_mutex_create_recursive(pool, ice->obj_name, 
-				       &ice->mutex);
-    if (status != PJ_SUCCESS) {
-	destroy_ice(ice, status);
-	return status;
+    if (grp_lock) {
+	ice->grp_lock = grp_lock;
+    } else {
+	status = pj_grp_lock_create(pool, NULL, &ice->grp_lock);
+	if (status != PJ_SUCCESS) {
+	    pj_pool_release(pool);
+	    return status;
+	}
     }
+
+    pj_grp_lock_add_ref(ice->grp_lock);
+    pj_grp_lock_add_handler(ice->grp_lock, pool, ice,
+                            &ice_on_destroy);
 
     pj_memcpy(&ice->cb, cb, sizeof(*cb));
     pj_memcpy(&ice->stun_cfg, stun_cfg, sizeof(*stun_cfg));
@@ -398,14 +427,16 @@ PJ_DEF(pj_status_t) pj_ice_sess_create(pj_stun_config *stun_cfg,
     }
 
     if (local_passwd == NULL) {
-	ice->rx_pass.ptr = (char*) pj_pool_alloc(ice->pool, PJ_ICE_UFRAG_LEN);
-	pj_create_random_string(ice->rx_pass.ptr, PJ_ICE_UFRAG_LEN);
-	ice->rx_pass.slen = PJ_ICE_UFRAG_LEN;
+	ice->rx_pass.ptr = (char*) pj_pool_alloc(ice->pool, PJ_ICE_PWD_LEN);
+	pj_create_random_string(ice->rx_pass.ptr, PJ_ICE_PWD_LEN);
+	ice->rx_pass.slen = PJ_ICE_PWD_LEN;
     } else {
 	pj_strdup(ice->pool, &ice->rx_pass, local_passwd);
     }
 
     pj_list_init(&ice->early_check);
+
+	ice->tnl_timeout_msec = tnl_timeout_msec;
 
     /* Done */
     *p_ice = ice;
@@ -444,6 +475,21 @@ PJ_DEF(pj_status_t) pj_ice_sess_set_options(pj_ice_sess *ice,
 
 
 /*
+ * Callback to really destroy the session
+ */
+static void ice_on_destroy(void *obj)
+{
+    pj_ice_sess *ice = (pj_ice_sess*) obj;
+
+    if (ice->pool) {
+	pj_pool_t *pool = ice->pool;
+	ice->pool = NULL;
+	pj_pool_release(pool);
+    }
+    LOG4((THIS_FILE, "ICE session %p destroyed", ice));
+}
+
+/*
  * Destroy
  */
 static void destroy_ice(pj_ice_sess *ice,
@@ -452,43 +498,36 @@ static void destroy_ice(pj_ice_sess *ice,
     unsigned i;
 
     if (reason == PJ_SUCCESS) {
-	LOG4((ice->obj_name, "Destroying ICE session"));
+	LOG4((ice->obj_name, "Destroying ICE session %p", ice));
     }
 
-    /* Let other callbacks finish */
-    if (ice->mutex) {
-	pj_mutex_lock(ice->mutex);
-	pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	pj_grp_lock_release(ice->grp_lock);
+	return;
     }
 
-    if (ice->timer.id) {
-	pj_timer_heap_cancel(ice->stun_cfg.timer_heap, 
-			     &ice->timer);
-	ice->timer.id = PJ_FALSE;
-    }
+    ice->is_destroying = PJ_TRUE;
 
+    pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap,
+                                   &ice->timer, PJ_FALSE);
+
+	if (!ice->partial_destroy) {
     for (i=0; i<ice->comp_cnt; ++i) {
 	if (ice->comp[i].stun_sess) {
 	    pj_stun_session_destroy(ice->comp[i].stun_sess);
 	    ice->comp[i].stun_sess = NULL;
 	}
     }
+	}
 
-    if (ice->clist.timer.id) {
-	pj_timer_heap_cancel(ice->stun_cfg.timer_heap, &ice->clist.timer);
-	ice->clist.timer.id = PJ_FALSE;
-    }
+    pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap,
+                                   &ice->clist.timer,
+                                   PJ_FALSE);
 
-    if (ice->mutex) {
-	pj_mutex_destroy(ice->mutex);
-	ice->mutex = NULL;
-    }
-
-    if (ice->pool) {
-	pj_pool_t *pool = ice->pool;
-	ice->pool = NULL;
-	pj_pool_release(pool);
-    }
+    pj_grp_lock_dec_ref(ice->grp_lock);
+    pj_grp_lock_release(ice->grp_lock);
 }
 
 
@@ -524,13 +563,13 @@ PJ_DEF(pj_status_t) pj_ice_sess_change_role(pj_ice_sess *ice,
  * Change type preference
  */
 PJ_DEF(pj_status_t) pj_ice_sess_set_prefs(pj_ice_sess *ice,
-					  const pj_uint8_t prefs[4])
+					  const pj_uint8_t prefs[7])
 {
     unsigned i;
     PJ_ASSERT_RETURN(ice && prefs, PJ_EINVAL);
-    ice->prefs = (pj_uint8_t*) pj_pool_calloc(ice->pool, PJ_ARRAY_SIZE(prefs),
+    ice->prefs = (pj_uint8_t*) pj_pool_calloc(ice->pool, 7,
 					      sizeof(pj_uint8_t));
-    for (i=0; i<4; ++i) {
+    for (i=0; i<7; ++i) {
 #if PJ_ICE_CAND_TYPE_PREF_BITS < 8
 	pj_assert(prefs[i] < (2 << PJ_ICE_CAND_TYPE_PREF_BITS));
 #endif
@@ -543,7 +582,11 @@ PJ_DEF(pj_status_t) pj_ice_sess_set_prefs(pj_ice_sess *ice,
 /* Find component by ID */
 static pj_ice_sess_comp *find_comp(const pj_ice_sess *ice, unsigned comp_id)
 {
-    pj_assert(comp_id > 0 && comp_id <= ice->comp_cnt);
+    /* Ticket #1844: possible wrong assertion when remote has less ICE comp */
+    //pj_assert(comp_id > 0 && comp_id <= ice->comp_cnt);
+    if (comp_id > ice->comp_cnt)
+	return NULL;
+
     return (pj_ice_sess_comp*) &ice->comp[comp_id-1];
 }
 
@@ -618,7 +661,9 @@ static pj_status_t stun_auth_get_password(const pj_stun_msg *msg,
 	PJ_STUN_IS_ERROR_RESPONSE(msg->hdr.type))
     {
 	/* Incoming response is authenticated with TX credential */
-	/* Verify username */
+		/* Verify username */
+		PJ_LOG(4, ("ice_session.c", "stun_auth_get_password() different username [l=%.*s] [rx=%.*s]", 
+			username->slen, username->ptr, ice->tx_uname.slen, ice->tx_uname.ptr));
 	if (pj_strcmp(username, &ice->tx_uname) != 0)
 	    return PJ_STATUS_FROM_STUN_CODE(PJ_STUN_SC_UNAUTHORIZED);
 	*data_type = PJ_STUN_PASSWD_PLAIN;
@@ -643,6 +688,8 @@ static pj_status_t stun_auth_get_password(const pj_stun_msg *msg,
 	ufrag.ptr = (char*)username->ptr;
 	ufrag.slen = (pos - username->ptr);
 
+	PJ_LOG(4, ("ice_session.c", "stun_auth_get_password() different ufrag [%.*s] [%.*s] [%.*s]", 
+		ufrag.slen, ufrag.ptr, ice->rx_ufrag.slen, ice->rx_ufrag.ptr, username->slen, username->ptr));
 	if (pj_strcmp(&ufrag, &ice->rx_ufrag) != 0)
 	    return PJ_STATUS_FROM_STUN_CODE(PJ_STUN_SC_UNAUTHORIZED);
 
@@ -655,7 +702,7 @@ static pj_status_t stun_auth_get_password(const pj_stun_msg *msg,
 }
 
 
-static pj_uint32_t CALC_CAND_PRIO(pj_ice_sess *ice,
+PJ_DEF(pj_uint32_t) CALC_CAND_PRIO(pj_ice_sess *ice,
 				  pj_ice_cand_type type,
 				  pj_uint32_t local_pref,
 				  pj_uint32_t comp_id)
@@ -697,17 +744,22 @@ PJ_DEF(pj_status_t) pj_ice_sess_add_cand(pj_ice_sess *ice,
 					 const pj_sockaddr_t *base_addr,
 					 const pj_sockaddr_t *rel_addr,
 					 int addr_len,
-					 unsigned *p_cand_id)
+					 unsigned *p_cand_id,
+					 pj_ice_cand_tcp_type tcp_type,
+					 pj_time_val adding_time,
+					 pj_time_val ending_time,
+					 pj_bool_t enabled)
 {
     pj_ice_sess_cand *lcand;
     pj_status_t status = PJ_SUCCESS;
+	char *s_addr;
 
     PJ_ASSERT_RETURN(ice && comp_id && 
 		     foundation && addr && base_addr && addr_len,
 		     PJ_EINVAL);
     PJ_ASSERT_RETURN(comp_id <= ice->comp_cnt, PJ_EINVAL);
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
 
     if (ice->lcand_cnt >= PJ_ARRAY_SIZE(ice->lcand)) {
 	status = PJ_ETOOMANY;
@@ -725,13 +777,25 @@ PJ_DEF(pj_status_t) pj_ice_sess_add_cand(pj_ice_sess *ice,
     if (rel_addr == NULL)
 	rel_addr = base_addr;
     pj_memcpy(&lcand->rel_addr, rel_addr, addr_len);
+	lcand->tcp_type = tcp_type;
+	lcand->adding_time = adding_time;
+	lcand->ending_time = ending_time;
+	lcand->enabled = enabled;
+	s_addr = pj_inet_ntoa(lcand->addr.ipv4.sin_addr);
+	if (lcand->type == PJ_ICE_CAND_TYPE_HOST_TCP &&
+		lcand->addr.addr.sa_family == pj_AF_INET() && 
+		(memcmp(s_addr, "10.", 3) == 0 ||
+		memcmp(s_addr, "172.16.", 7) == 0 ||
+		memcmp(s_addr, "192.168.", 8) == 0))
+		lcand->prio *=2;
 
     pj_ansi_strcpy(ice->tmp.txt, pj_inet_ntoa(lcand->addr.ipv4.sin_addr));
     LOG4((ice->obj_name, 
-	 "Candidate %d added: comp_id=%d, type=%s, foundation=%.*s, "
-	 "addr=%s:%d, base=%s:%d, prio=0x%x (%u)",
+	 "Candidate %d added: comp_id=%d, tp_id=%d, type=%s, foundation=%.*s, "
+	 "addr=%s:%d, base=%s:%d, prio=0x%x (%u), local_pref=%u, tcp_type=%d, prefs=%u",
 	 ice->lcand_cnt, 
 	 lcand->comp_id, 
+	 lcand->transport_id,
 	 cand_type_names[lcand->type],
 	 (int)lcand->foundation.slen,
 	 lcand->foundation.ptr,
@@ -739,7 +803,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_add_cand(pj_ice_sess *ice,
 	 (int)pj_ntohs(lcand->addr.ipv4.sin_port),
 	 pj_inet_ntoa(lcand->base_addr.ipv4.sin_addr),
 	 (int)pj_htons(lcand->base_addr.ipv4.sin_port),
-	 lcand->prio, lcand->prio));
+	 lcand->prio, lcand->prio, local_pref, lcand->tcp_type, ice->prefs[type]));
 
     if (p_cand_id)
 	*p_cand_id = ice->lcand_cnt;
@@ -747,7 +811,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_add_cand(pj_ice_sess *ice,
     ++ice->lcand_cnt;
 
 on_error:
-    pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
     return status;
 }
 
@@ -764,7 +828,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
 
     *cand_id = -1;
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
 
     /* First find in valid list if we have nominated pair */
     for (i=0; i<ice->valid_list.count; ++i) {
@@ -772,7 +836,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
 	
 	if (check->lcand->comp_id == comp_id) {
 	    *cand_id = GET_LCAND_ID(check->lcand);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return PJ_SUCCESS;
 	}
     }
@@ -784,7 +848,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
 	    lcand->type == PJ_ICE_CAND_TYPE_RELAYED) 
 	{
 	    *cand_id = GET_LCAND_ID(lcand);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return PJ_SUCCESS;
 	}
     }
@@ -793,11 +857,12 @@ PJ_DEF(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
     for (i=0; i<ice->lcand_cnt; ++i) {
 	pj_ice_sess_cand *lcand = &ice->lcand[i];
 	if (lcand->comp_id==comp_id &&
-	    (lcand->type == PJ_ICE_CAND_TYPE_SRFLX ||
-	     lcand->type == PJ_ICE_CAND_TYPE_PRFLX)) 
+		(lcand->type == PJ_ICE_CAND_TYPE_SRFLX ||
+		lcand->type == PJ_ICE_CAND_TYPE_PRFLX ||
+		lcand->type == PJ_ICE_CAND_TYPE_SRFLX_TCP)) 
 	{
 	    *cand_id = GET_LCAND_ID(lcand);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return PJ_SUCCESS;
 	}
     }
@@ -806,16 +871,17 @@ PJ_DEF(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
     for (i=0; i<ice->lcand_cnt; ++i) {
 	pj_ice_sess_cand *lcand = &ice->lcand[i];
 	if (lcand->comp_id==comp_id &&
-	    lcand->type == PJ_ICE_CAND_TYPE_HOST) 
+	    (lcand->type == PJ_ICE_CAND_TYPE_HOST || 
+		lcand->type == PJ_ICE_CAND_TYPE_HOST_TCP))
 	{
 	    *cand_id = GET_LCAND_ID(lcand);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return PJ_SUCCESS;
 	}
     }
 
     /* Still no candidate is found! :( */
-    pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
 
     pj_assert(!"Should have a candidate by now");
     return PJ_EBUG;
@@ -830,7 +896,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_find_default_cand(pj_ice_sess *ice,
 #   define MAX(a,b) (a > b ? a : b)
 #endif
 
-static pj_timestamp CALC_CHECK_PRIO(const pj_ice_sess *ice, 
+PJ_DEF(pj_timestamp) CALC_CHECK_PRIO(const pj_ice_sess *ice, 
 				    const pj_ice_sess_cand *lcand,
 				    const pj_ice_sess_cand *rcand)
 {
@@ -867,9 +933,20 @@ PJ_INLINE(int) CMP_CHECK_PRIO(const pj_ice_sess_check *c1,
     return pj_cmp_timestamp(&c1->prio, &c2->prio);
 }
 
+PJ_INLINE(int) CMP_CHECK_TRANSPORT_ID(const pj_ice_sess_check *c1,
+			      const pj_ice_sess_check *c2)
+{
+        int prio[5] = {0, 3, 2, 4, 1};  // {TP_NONE, TP_STUN, TP_TURN, TP_UPNP_TCP, TP_TURN_TCP}
+        int v1 = prio[c1->lcand->transport_id];
+		int v2 = prio[c2->lcand->transport_id];
+
+        if(v1>v2) return 1;
+        else if(v1<v2) return -1;
+        else return 0;
+}
 
 #if PJ_LOG_MAX_LEVEL >= 4
-static const char *dump_check(char *buffer, unsigned bufsize,
+PJ_DEF(const char *)dump_check(char *buffer, unsigned bufsize,
 			      const pj_ice_sess_checklist *clist,
 			      const pj_ice_sess_check *check)
 {
@@ -884,12 +961,17 @@ static const char *dump_check(char *buffer, unsigned bufsize,
 
     if (lcand->addr.addr.sa_family == pj_AF_INET()) {
 	len = pj_ansi_snprintf(buffer, bufsize,
-			       "%d: [%d] %s:%d-->%s:%d",
+              "%d: [%d,%d-%d] %s:%d-->%s:%d[%llu](%d,%d)",
 			       (int)GET_CHECK_ID(clist, check),
-			       check->lcand->comp_id,
+				   lcand->comp_id,
+				   lcand->transport_id,
+				   rcand->transport_id,
 			       laddr, (int)pj_ntohs(lcand->addr.ipv4.sin_port),
 			       pj_inet_ntoa(rcand->addr.ipv4.sin_addr),
-			       (int)pj_ntohs(rcand->addr.ipv4.sin_port));
+			       (int)pj_ntohs(rcand->addr.ipv4.sin_port),
+				   check->prio,
+				   check->local_path,
+				   check->tcp_sess_idx);
     } else {
 	len = pj_ansi_snprintf(buffer, bufsize, "IPv6->IPv6");
     }
@@ -996,6 +1078,58 @@ static void sort_checklist(pj_ice_sess *ice, pj_ice_sess_checklist *clist)
     }
 }
 
+/* Sort validlist based on transport id */
+static void sort_validlist(pj_ice_sess *ice, pj_ice_sess_checklist *clist)
+{
+    int i;
+    pj_ice_sess_check **check_ptr[PJ_ICE_MAX_COMP*2];
+    int check_ptr_cnt = 0;
+
+    for (i=0; i<ice->comp_cnt; ++i) {
+	if (ice->comp[i].valid_check) {
+	    check_ptr[check_ptr_cnt++] = &ice->comp[i].valid_check;
+	}
+	if (ice->comp[i].nominated_check) {
+	    check_ptr[check_ptr_cnt++] = &ice->comp[i].nominated_check;
+	}
+    }
+
+    for (i=0; i<(int)(clist->count-1); ++i) {
+	int j, highest = i;
+
+	for (j=i+1; j<clist->count; ++j) {
+	    if (CMP_CHECK_TRANSPORT_ID(&clist->checks[j], &clist->checks[highest]) > 0) {
+		highest = j;
+	    }
+	}
+
+	if (highest != i) {
+	    pj_ice_sess_check tmp;
+	    int k;
+
+	    pj_memcpy(&tmp, &clist->checks[i], sizeof(pj_ice_sess_check));
+	    pj_memcpy(&clist->checks[i], &clist->checks[highest], 
+		      sizeof(pj_ice_sess_check));
+	    pj_memcpy(&clist->checks[highest], &tmp, 
+		      sizeof(pj_ice_sess_check));
+
+	    /* Update valid and nominated check pointers, since we're moving
+	     * around checks
+	     */
+	    for (k=0; k<check_ptr_cnt; ++k) {
+		if (*check_ptr[k] == &clist->checks[highest])
+		    *check_ptr[k] = &clist->checks[i];
+		else if (*check_ptr[k] == &clist->checks[i])
+		    *check_ptr[k] = &clist->checks[highest];
+	    }
+	}
+    }
+
+    //update RTP comp
+	if (clist->count > 0)
+		update_comp_check(ice, 1, &clist->checks[0]);
+}
+
 enum 
 { 
     SOCKADDR_EQUAL = 0, 
@@ -1044,33 +1178,62 @@ static pj_status_t prune_checklist(pj_ice_sess *ice,
     for (i=0; i<clist->count; ++i) {
 	pj_ice_sess_cand *srflx = clist->checks[i].lcand;
 
-	if (clist->checks[i].lcand->type == PJ_ICE_CAND_TYPE_SRFLX) {
-	    /* Find the base for this candidate */
-	    unsigned j;
-	    for (j=0; j<ice->lcand_cnt; ++j) {
-		pj_ice_sess_cand *host = &ice->lcand[j];
+		if (clist->checks[i].lcand->type == PJ_ICE_CAND_TYPE_SRFLX) {
+			/* Find the base for this candidate */
+			unsigned j;
+			for (j=0; j<ice->lcand_cnt; ++j) {
+				pj_ice_sess_cand *host = &ice->lcand[j];
 
-		if (host->type != PJ_ICE_CAND_TYPE_HOST)
-		    continue;
+				if (host->type != PJ_ICE_CAND_TYPE_HOST)
+					continue;
 
-		if (sockaddr_cmp(&srflx->base_addr, &host->addr) == 0) {
-		    /* Replace this SRFLX with its BASE */
-		    clist->checks[i].lcand = host;
-		    break;
+				if (sockaddr_cmp(&srflx->base_addr, &host->addr) == 0) {
+					/* Replace this SRFLX with its BASE */
+					clist->checks[i].lcand = host;
+					clist->checks[i].local_path = (clist->checks[i].lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+						(clist->checks[i].lcand->tcp_type == clist->checks[i].rcand->tcp_type));
+					break;
+				}
+			}
+
+			if (j==ice->lcand_cnt) {
+				/* Host candidate not found this this srflx! */
+				LOG4((ice->obj_name, 
+					"Base candidate %s:%d not found for srflx candidate %d",
+					pj_inet_ntoa(srflx->base_addr.ipv4.sin_addr),
+					pj_ntohs(srflx->base_addr.ipv4.sin_port),
+					GET_LCAND_ID(clist->checks[i].lcand)));
+				return PJNATH_EICENOHOSTCAND;
+			}
+		} else if (clist->checks[i].lcand->type == PJ_ICE_CAND_TYPE_SRFLX_TCP) { //natnl tcp candidate
+			/* Find the base for this candidate */
+			unsigned j;
+			for (j=0; j<ice->lcand_cnt; ++j) {
+				pj_ice_sess_cand *host = &ice->lcand[j];
+
+				if (host->type != PJ_ICE_CAND_TYPE_HOST_TCP)
+					continue;
+
+				if (sockaddr_cmp(&srflx->base_addr, &host->addr) == 0) {
+					/* Replace this SRFLX with its BASE */
+					clist->checks[i].lcand = host;
+					clist->checks[i].local_path = (clist->checks[i].lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+						(clist->checks[i].lcand->tcp_type == clist->checks[i].rcand->tcp_type));
+					break;
+				}
+			}
+
+			if (j==ice->lcand_cnt) {
+				/* Host candidate not found this this srflx! */
+				LOG4((ice->obj_name, 
+					"Base candidate %s:%d not found for srflx candidate %d",
+					pj_inet_ntoa(srflx->base_addr.ipv4.sin_addr),
+					pj_ntohs(srflx->base_addr.ipv4.sin_port),
+					GET_LCAND_ID(clist->checks[i].lcand)));
+				return PJNATH_EICENOHOSTCAND;
+			}
 		}
-	    }
-
-	    if (j==ice->lcand_cnt) {
-		/* Host candidate not found this this srflx! */
-		LOG4((ice->obj_name, 
-		      "Base candidate %s:%d not found for srflx candidate %d",
-		      pj_inet_ntoa(srflx->base_addr.ipv4.sin_addr),
-		      pj_ntohs(srflx->base_addr.ipv4.sin_port),
-		      GET_LCAND_ID(clist->checks[i].lcand)));
-		return PJNATH_EICENOHOSTCAND;
-	    }
 	}
-    }
 
     /* Next remove a pair if its local and remote candidates are identical
      * to the local and remote candidates of a pair higher up on the priority
@@ -1090,11 +1253,13 @@ static pj_status_t prune_checklist(pj_ice_sess *ice,
 	    pj_ice_sess_cand *rjcand = clist->checks[j].rcand;
 	    const char *reason = NULL;
 
-	    if ((licand == ljcand) && (ricand == rjcand)) {
+		if ((licand == ljcand) && (ricand == rjcand)) {
 		reason = "duplicate found";
 	    } else if ((rjcand == ricand) &&
 		       (sockaddr_cmp(&ljcand->base_addr, 
-				     &licand->base_addr)==0)) 
+			   &licand->base_addr)==0) && 
+			   (ljcand->tcp_type == licand->tcp_type) && 
+			   (rjcand->tcp_type == ricand->tcp_type)) 
 	    {
 		reason = "equal base";
 	    }
@@ -1124,20 +1289,45 @@ static void on_timer(pj_timer_heap_t *th, pj_timer_entry *te)
 {
     pj_ice_sess *ice = (pj_ice_sess*) te->user_data;
     enum timer_type type = (enum timer_type)te->id;
-    pj_bool_t has_mutex = PJ_TRUE;
 
     PJ_UNUSED_ARG(th);
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
 
     te->id = TIMER_NONE;
 
+    if (ice->is_destroying) {
+	/* Stray timer, could happen when destroy is invoked while callback
+	 * is pending. */
+	pj_grp_lock_release(ice->grp_lock);
+	return;
+    }
+
     switch (type) {
     case TIMER_CONTROLLED_WAIT_NOM:
-	LOG4((ice->obj_name, 
-	      "Controlled agent timed-out in waiting for the controlling "
-	      "agent to send nominated check. Setting state to fail now.."));
-	on_ice_complete(ice, PJNATH_EICENOMTIMEOUT);
+		// natnl
+		{
+			int i;
+			pj_bool_t has_nominated = PJ_FALSE;
+			for (i = 0; i < ice->valid_list.count; i++) {
+				pj_ice_sess_check check = ice->valid_list.checks[i];
+				if (check.nominated) {
+					has_nominated = PJ_TRUE;
+					break;
+				}
+			}
+			if (!has_nominated) {
+				LOG4((ice->obj_name, 
+					  "Controlled agent timed-out in waiting for the controlling "
+					  "agent to send nominated check. Setting state to fail now.."));
+				on_ice_complete(ice, PJNATH_EICENOMTIMEOUT);
+			} else {
+				LOG4((ice->obj_name, 
+					"Controlled agent timed-out in waiting for the controlling "
+					"agent to send nominated check. But we have nominated check in valid list.."));
+				on_ice_complete(ice, PJ_SUCCESS);
+			}
+		}
 	break;
     case TIMER_COMPLETION_CALLBACK:
 	{
@@ -1154,8 +1344,6 @@ static void on_timer(pj_timer_heap_t *th, pj_timer_entry *te)
 	    /* Release mutex in case app destroy us in the callback */
 	    ice_status = ice->ice_status;
 	    on_ice_complete = ice->cb.on_ice_complete;
-	    has_mutex = PJ_FALSE;
-	    pj_mutex_unlock(ice->mutex);
 
 	    /* Notify app about ICE completion*/
 	    if (on_ice_complete)
@@ -1173,8 +1361,7 @@ static void on_timer(pj_timer_heap_t *th, pj_timer_entry *te)
 	break;
     }
 
-    if (has_mutex)
-	pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
 }
 
 /* Send keep-alive */
@@ -1190,16 +1377,37 @@ static void ice_keep_alive(pj_ice_sess *ice, pj_bool_t send_now)
 	pj_bool_t saved;
 	pj_status_t status;
 
+	struct pj_tcp_session *tcp_sess;
+	struct pj_stun_session *stun_sess;
+
 	/* Must have nominated check by now */
 	pj_assert(comp->nominated_check != NULL);
 	the_check = comp->nominated_check;
 
+	if (pj_ice_strans_tp_is_upnp_tcp(the_check->lcand->transport_id)) {
+		if (ice->role == PJ_ICE_SESS_ROLE_CONTROLLING)
+		{
+			tcp_sess = pj_ice_strans_get_tcp_client_sess(ice->user_data, ice->comp_ka+1, the_check->tcp_sess_idx);
+		} else {
+			tcp_sess = pj_ice_strans_get_tcp_server_accepted_sess(ice->user_data, ice->comp_ka+1, the_check->tcp_sess_idx);
+			if (tcp_sess == NULL)
+				goto done;
+		}
+		stun_sess = pj_tcp_session_get_stun_session(tcp_sess);
+		PJ_LOG(5, (pj_tcp_session_get_object_name(tcp_sess), "ice_keep_alive() tcp_stun_sess=%p", 
+			stun_sess));
+		/* Create the Binding Indication */
+		status = pj_stun_session_create_ind(stun_sess, 
+			PJ_STUN_BINDING_INDICATION,
+			&tdata);
+	} else {
 	/* Create the Binding Indication */
 	status = pj_stun_session_create_ind(comp->stun_sess, 
 					    PJ_STUN_BINDING_INDICATION,
 					    &tdata);
 	if (status != PJ_SUCCESS)
 	    goto done;
+	}
 
 	/* Need the transport_id */
 	msg_data = PJ_POOL_ZALLOC_T(tdata->pool, pj_ice_msg_data);
@@ -1232,8 +1440,10 @@ done:
 		     ice->comp_cnt;
 	pj_time_val_normalize(&delay);
 
-	ice->timer.id = TIMER_KEEP_ALIVE;
-	pj_timer_heap_schedule(ice->stun_cfg.timer_heap, &ice->timer, &delay);
+	pj_timer_heap_schedule_w_grp_lock(ice->stun_cfg.timer_heap,
+	                                  &ice->timer, &delay,
+	                                  TIMER_KEEP_ALIVE,
+	                                  ice->grp_lock);
 
     } else {
 	pj_assert(!"Not expected any timer active");
@@ -1247,25 +1457,27 @@ static void on_ice_complete(pj_ice_sess *ice, pj_status_t status)
 	ice->is_complete = PJ_TRUE;
 	ice->ice_status = status;
     
-	if (ice->timer.id != TIMER_NONE) {
-	    pj_timer_heap_cancel(ice->stun_cfg.timer_heap, &ice->timer);
-	    ice->timer.id = TIMER_NONE;
-	}
+	pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap, &ice->timer,
+	                               TIMER_NONE);
 
 	/* Log message */
 	LOG4((ice->obj_name, "ICE process complete, status=%s", 
 	     pj_strerror(status, ice->tmp.errmsg, 
 			 sizeof(ice->tmp.errmsg)).ptr));
 
-	dump_checklist("Valid list", ice, &ice->valid_list);
+        /* Sort checklist based on priority */
+	sort_validlist(ice, &ice->valid_list);
+
+        dump_checklist("Valid list", ice, &ice->valid_list);
 
 	/* Call callback */
 	if (ice->cb.on_ice_complete) {
 	    pj_time_val delay = {0, 0};
 
-	    ice->timer.id = TIMER_COMPLETION_CALLBACK;
-	    pj_timer_heap_schedule(ice->stun_cfg.timer_heap, 
-				   &ice->timer, &delay);
+	    pj_timer_heap_schedule_w_grp_lock(ice->stun_cfg.timer_heap,
+	                                      &ice->timer, &delay,
+	                                      TIMER_COMPLETION_CALLBACK,
+	                                      ice->grp_lock);
 	}
     }
 }
@@ -1280,7 +1492,8 @@ static void update_comp_check(pj_ice_sess *ice, unsigned comp_id,
     if (comp->valid_check == NULL) {
 	comp->valid_check = check;
     } else {
-	if (CMP_CHECK_PRIO(comp->valid_check, check) < 0)
+	//if (CMP_CHECK_PRIO(comp->valid_check, check) < 0)
+	if (CMP_CHECK_TRANSPORT_ID(comp->valid_check, check) < 0)
 	    comp->valid_check = check;
     }
 
@@ -1289,7 +1502,8 @@ static void update_comp_check(pj_ice_sess *ice, unsigned comp_id,
 	if (comp->nominated_check == NULL) {
 	    comp->nominated_check = check;
 	} else {
-	    if (CMP_CHECK_PRIO(comp->nominated_check, check) < 0)
+	    //if (CMP_CHECK_PRIO(comp->nominated_check, check) < 0)
+	    if (CMP_CHECK_TRANSPORT_ID(comp->nominated_check, check) < 0)
 		comp->nominated_check = check;
 	}
     }
@@ -1300,7 +1514,8 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 				   pj_ice_sess_check *check)
 {
     pj_ice_sess_comp *comp;
-    unsigned i;
+    unsigned i, j;
+	pj_bool_t can_nomination = PJ_FALSE;
 
     pj_assert(check->state >= PJ_ICE_SESS_CHECK_STATE_SUCCEEDED);
 
@@ -1387,6 +1602,7 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 					&ice->clist, c)));
 			pj_stun_session_cancel_req(comp->stun_sess, 
 						   c->tdata, PJ_FALSE, 0);
+			c->transmit_count = pj_stun_tsx_tansmit_count(c->tdata->client_tsx);
 			c->tdata = NULL;
 			check_set_state(ice, c, PJ_ICE_SESS_CHECK_STATE_FAILED,
 					PJ_ECANCELLED);
@@ -1422,9 +1638,11 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 	    break;
     }
     if (i == ice->comp_cnt) {
-	/* All components have nominated pair */
-	on_ice_complete(ice, PJ_SUCCESS);
-	return PJ_TRUE;
+		/* All components have nominated pair */
+		on_ice_complete(ice, PJ_SUCCESS);
+		// 2013-10-18 DEAN, don't do this temporarily
+		//natnl_save_to_cache(pj_ice_strans_get_dest_uri(ice->user_data), check);
+		return PJ_TRUE;
     }
 
     /* Note: this is the stuffs that we don't do in 7.1.2.2.2, since our
@@ -1449,7 +1667,18 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
      * component of the media stream, the state of the check list is set to
      * Failed.  
      */
-
+#if 0
+    /* 
+     * See if all checks in the checklist have completed. If we do,
+     * then mark ICE processing as failed.
+     */
+    for (i=0; i<ice->clist.count; ++i) {
+	pj_ice_sess_check *c = &ice->clist.checks[i];
+	if (c->state < PJ_ICE_SESS_CHECK_STATE_SUCCEEDED) {
+	    break;
+	}
+    }
+#else
     /* 
      * See if all checks in the checklist have completed. If we do,
      * then mark ICE processing as failed.
@@ -1461,7 +1690,42 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 	}
     }
 
-    if (i == ice->clist.count) {
+	/* 
+	 * 2015-03-09 dean
+	 * For shorten ice procedure.
+	 * The nomination check starting conditions.
+	 * 1. one udp check success.
+	 * 2. one turn check success and the all rest checks failed. This condition may not happen. Just for assurance.
+	 * 3. the nomination check timer launched.
+	 */
+	if (ice->role == PJ_ICE_SESS_ROLE_CONTROLLING)
+	{
+		int udp_check_ok = 0, turn_check_ok = 0, failed_check = 0;
+		for (j=0; j<ice->clist.count; ++j) {
+			pj_ice_sess_check *c = &ice->clist.checks[j];
+			if (c->state == PJ_ICE_SESS_CHECK_STATE_SUCCEEDED) {
+				if (c->lcand->transport_id == 1)
+					udp_check_ok++;
+				if (c->lcand->transport_id == 2)
+					turn_check_ok++;
+			} else if (c->state == PJ_ICE_SESS_CHECK_STATE_FAILED) {
+				failed_check++;
+			}
+
+			LOG5((ice->obj_name, 
+				"@@@Check %s state is %s",
+				dump_check(ice->tmp.txt, sizeof(ice->tmp.txt), 
+				&ice->clist, c), 
+				check_state_name[c->state]));
+		}
+
+		if (udp_check_ok || 
+			(ice->clist.count - failed_check == turn_check_ok))
+			can_nomination = PJ_TRUE;
+	}
+#endif
+
+    if (i == ice->clist.count || can_nomination) {
 	/* All checks have completed, but we don't have nominated pair.
 	 * If agent's role is controlled, check if all components have
 	 * valid pair. If it does, this means the controlled agent has
@@ -1493,10 +1757,11 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 		    delay.msec = ice->opt.controlled_agent_want_nom_timeout;
 		    pj_time_val_normalize(&delay);
 
-		    ice->timer.id = TIMER_CONTROLLED_WAIT_NOM;
-		    pj_timer_heap_schedule(ice->stun_cfg.timer_heap, 
-					   &ice->timer,
-					   &delay);
+		    pj_timer_heap_schedule_w_grp_lock(
+					ice->stun_cfg.timer_heap,
+		                        &ice->timer, &delay,
+		                        TIMER_CONTROLLED_WAIT_NOM,
+		                        ice->grp_lock);
 
 		    LOG5((ice->obj_name, 
 			  "All checks have completed. Controlled agent now "
@@ -1508,7 +1773,7 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 	    }
 
 	    /* Unreached */
-
+#if 0 // dean 
 	} else if (ice->is_nominating) {
 	    /* We are controlling agent and all checks have completed but
 	     * there's at least one component without nominated pair (or
@@ -1516,7 +1781,7 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 	     */
 	    on_ice_complete(ice, PJNATH_EICEFAILED);
 	    return PJ_TRUE;
-
+#endif
 	} else {
 	    /* We are controlling agent and all checks have completed. If
 	     * we have valid list for every component, then move on to
@@ -1572,10 +1837,8 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 	      "Scheduling nominated check in %d ms",
 	      ice->opt.nominated_check_delay));
 
-	if (ice->timer.id != TIMER_NONE) {
-	    pj_timer_heap_cancel(ice->stun_cfg.timer_heap, &ice->timer);
-	    ice->timer.id = TIMER_NONE;
-	}
+	pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap, &ice->timer,
+	                               TIMER_NONE);
 
 	/* All components have valid pair. Let connectivity checks run for
 	 * a little bit more time, then start our nominated check.
@@ -1584,8 +1847,10 @@ static pj_bool_t on_check_complete(pj_ice_sess *ice,
 	delay.msec = ice->opt.nominated_check_delay;
 	pj_time_val_normalize(&delay);
 
-	ice->timer.id = TIMER_START_NOMINATED_CHECK;
-	pj_timer_heap_schedule(ice->stun_cfg.timer_heap, &ice->timer, &delay);
+	pj_timer_heap_schedule_w_grp_lock(ice->stun_cfg.timer_heap,
+	                                  &ice->timer, &delay,
+	                                  TIMER_START_NOMINATED_CHECK,
+	                                  ice->grp_lock);
 	return PJ_FALSE;
     }
 
@@ -1600,7 +1865,8 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
 			      const pj_str_t *rem_ufrag,
 			      const pj_str_t *rem_passwd,
 			      unsigned rcand_cnt,
-			      const pj_ice_sess_cand rcand[])
+				  const pj_ice_sess_cand rcand[],
+				  int use_upnp_flag)
 {
     pj_ice_sess_checklist *clist;
     char buf[128];
@@ -1615,7 +1881,9 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
     PJ_ASSERT_RETURN(rcand_cnt + ice->rcand_cnt <= PJ_ICE_MAX_CAND, 
 		     PJ_ETOOMANY);
 
-    pj_mutex_lock(ice->mutex);
+	PJ_UNUSED_ARG(use_upnp_flag);
+
+    pj_grp_lock_acquire(ice->grp_lock);
 
     /* Save credentials */
     username.ptr = buf;
@@ -1663,7 +1931,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
 	    pj_ice_sess_check *chk = &clist->checks[clist->count];
 
 	    if (clist->count >= PJ_ICE_MAX_CHECKS) {
-		pj_mutex_unlock(ice->mutex);
+		pj_grp_lock_release(ice->grp_lock);
 		return PJ_ETOOMANY;
 	    } 
 
@@ -1671,8 +1939,17 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
 	     * and only if the two candidates have the same component ID 
 	     * and have the same IP address version. 
 	     */
-	    if ((lcand->comp_id != rcand->comp_id) ||
-		(lcand->addr.addr.sa_family != rcand->addr.addr.sa_family))
+	    if (!lcand->enabled || !rcand->enabled ||
+		(lcand->comp_id != rcand->comp_id) ||
+		(lcand->addr.addr.sa_family != rcand->addr.addr.sa_family) ||
+		(lcand->type == PJ_ICE_CAND_TYPE_RELAYED && rcand->type != PJ_ICE_CAND_TYPE_RELAYED && rcand->type != PJ_ICE_CAND_TYPE_RELAYED_TCP) || // TURN candidate must pair with TURN candidate
+		(lcand->type != PJ_ICE_CAND_TYPE_RELAYED && lcand->type != PJ_ICE_CAND_TYPE_RELAYED_TCP && rcand->type == PJ_ICE_CAND_TYPE_RELAYED) ||
+		(lcand->type == PJ_ICE_CAND_TYPE_RELAYED_TCP && rcand->type != PJ_ICE_CAND_TYPE_RELAYED && rcand->type != PJ_ICE_CAND_TYPE_RELAYED_TCP) || // TURN candidate must pair with TURN candidate
+		(lcand->type != PJ_ICE_CAND_TYPE_RELAYED && lcand->type != PJ_ICE_CAND_TYPE_RELAYED_TCP && rcand->type == PJ_ICE_CAND_TYPE_RELAYED_TCP) ||
+		(lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_PASSIVE && rcand->tcp_type != PJ_ICE_CAND_TCP_TYPE_ACTIVE) ||  //lcand is tcp passive
+		(lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && rcand->tcp_type != PJ_ICE_CAND_TCP_TYPE_PASSIVE && rcand->tcp_type != PJ_ICE_CAND_TCP_TYPE_ACTIVE) ||
+		(lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_NONE && rcand->tcp_type > PJ_ICE_CAND_TCP_TYPE_NONE)
+		)
 	    {
 		continue;
 	    }
@@ -1683,18 +1960,24 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
 	    chk->state = PJ_ICE_SESS_CHECK_STATE_FROZEN;
 
 	    chk->prio = CALC_CHECK_PRIO(ice, lcand, rcand);
+		
+		chk->local_path = (lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+			(lcand->tcp_type == rcand->tcp_type));
 
 	    clist->count++;
 	}
     }
 
     /* Sort checklist based on priority */
-    sort_checklist(ice, clist);
+	sort_checklist(ice, clist);
+
+	/* Log checklist */
+	dump_checklist("Checklist created:", ice, clist);
 
     /* Prune the checklist */
     status = prune_checklist(ice, clist);
     if (status != PJ_SUCCESS) {
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return status;
     }
 
@@ -1713,7 +1996,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
     clist->timer.id = PJ_FALSE;
     td = PJ_POOL_ZALLOC_T(ice->pool, timer_data);
     td->ice = ice;
-    td->clist = clist;
+	td->clist = clist;
     clist->timer.user_data = (void*)td;
     clist->timer.cb = &periodic_timer;
 
@@ -1721,7 +2004,105 @@ PJ_DEF(pj_status_t) pj_ice_sess_create_check_list(
     /* Log checklist */
     dump_checklist("Checklist created:", ice, clist);
 
-    pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
+
+    return PJ_SUCCESS;
+}
+
+/* Create checklist by pairing local candidates with remote candidates */
+PJ_DEF(pj_status_t) pj_ice_sess_create_cached_check_list(
+				  pj_ice_sess *ice,
+				  const pj_str_t *rem_ufrag,
+				  const pj_str_t *rem_passwd,
+				  pj_ice_sess_check *cached_check)
+{
+    pj_ice_sess_checklist *clist;
+    char buf[128];
+    pj_str_t username;
+    timer_data *td;
+    unsigned i;
+    unsigned highest_comp = 0;
+    pj_status_t status;
+	int check_idx;
+
+    PJ_ASSERT_RETURN(ice && rem_ufrag && rem_passwd,
+		     PJ_EINVAL);
+
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    /* Save credentials */
+    username.ptr = buf;
+
+    pj_strcpy(&username, rem_ufrag);
+    pj_strcat2(&username, ":");
+    pj_strcat(&username, &ice->rx_ufrag);
+
+    pj_strdup(ice->pool, &ice->tx_uname, &username);
+    pj_strdup(ice->pool, &ice->tx_ufrag, rem_ufrag);
+    pj_strdup(ice->pool, &ice->tx_pass, rem_passwd);
+
+    pj_strcpy(&username, &ice->rx_ufrag);
+    pj_strcat2(&username, ":");
+    pj_strcat(&username, rem_ufrag);
+
+	pj_strdup(ice->pool, &ice->rx_uname, &username);
+
+	highest_comp = 1;
+
+    /* Generate checklist */
+	clist = &ice->clist;
+	check_idx = clist->count++;
+	if (clist->count >= PJ_ICE_MAX_CHECKS) {
+		pj_grp_lock_release(ice->grp_lock);
+		return PJ_ETOOMANY;
+	} 
+	clist->checks[check_idx].err_code = 0;//cached_check->err_code;
+	clist->checks[check_idx].lcand = cached_check->lcand;
+	clist->checks[check_idx].local_path = cached_check->local_path;
+	clist->checks[check_idx].nominated = PJ_FALSE;
+	clist->checks[check_idx].prio = cached_check->prio;
+	clist->checks[check_idx].rcand = cached_check->rcand;
+	clist->checks[check_idx].state = PJ_ICE_SESS_CHECK_STATE_WAITING;
+	clist->checks[check_idx].tcp_sess_idx = cached_check->tcp_sess_idx;
+	//cached_clist->checks[check_idx].tdata = cached_check->tdata;
+
+    /* Sort checklist based on priority */
+	sort_checklist(ice, clist);
+
+	/* Log checklist */
+	dump_checklist("Cached Checklist created:", ice, clist);
+
+    /* Prune the checklist */
+    status = prune_checklist(ice, clist);
+    if (status != PJ_SUCCESS) {
+	pj_grp_lock_release(ice->grp_lock);
+	return status;
+    }
+
+    /* Disable our components which don't have matching component */
+    for (i=highest_comp; i<ice->comp_cnt; ++i) {
+	if (ice->comp[i].stun_sess) {
+	    pj_stun_session_destroy(ice->comp[i].stun_sess);
+	    pj_bzero(&ice->comp[i], sizeof(ice->comp[i]));
+	}
+    }
+    ice->comp_cnt = highest_comp;
+
+    /* Init timer entry in the checklist. Initially the timer ID is FALSE
+     * because timer is not running.
+     */
+    clist->timer.id = PJ_FALSE;
+    td = PJ_POOL_ZALLOC_T(ice->pool, timer_data);
+    td->ice = ice;
+	td->clist = clist;
+    clist->timer.user_data = (void*)td;
+    clist->timer.cb = &periodic_timer;
+
+
+    /* Log checklist */
+    dump_checklist("Cached Checklist created:", ice, clist);
+
+	pj_grp_lock_release(ice->grp_lock);
 
     return PJ_SUCCESS;
 }
@@ -1737,6 +2118,8 @@ static pj_status_t perform_check(pj_ice_sess *ice,
     pj_ice_sess_check *check;
     const pj_ice_sess_cand *lcand;
     const pj_ice_sess_cand *rcand;
+	pj_tcp_session *tcp_sess; // DEAN
+	pj_stun_session *stun_sess;
     pj_uint32_t prio;
     pj_status_t status;
 
@@ -1749,8 +2132,27 @@ static pj_status_t perform_check(pj_ice_sess *ice,
 	 "Sending connectivity check for check %s", 
 	 dump_check(ice->tmp.txt, sizeof(ice->tmp.txt), clist, check)));
 
+	// natnl if this is upnp tcp, do different thing.
+	if (!pj_ice_strans_tp_is_upnp_tcp(lcand->transport_id) /*|| lcand->comp_id == 2*/)
+		stun_sess = comp->stun_sess;
+	else {
+		tcp_sess = pj_ice_strans_get_tcp_client_sess(ice->user_data, lcand->comp_id, check->tcp_sess_idx);
+		if (tcp_sess == NULL || 
+			pj_tcp_session_get_state(tcp_sess) != PJ_TCP_STATE_READY) {
+			//stun_sess = comp->stun_sess;
+			check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_IN_PROGRESS, 
+				PJ_SUCCESS);
+			return PJ_SUCCESS;
+		}
+		else {
+			stun_sess = pj_tcp_session_get_stun_session(tcp_sess);
+			PJ_LOG(5, (pj_tcp_session_get_object_name(tcp_sess), "perform_check() tcp_stun_sess=%p", 
+				stun_sess));
+		}
+	}
+
     /* Create request */
-    status = pj_stun_session_create_req(comp->stun_sess, 
+    status = pj_stun_session_create_req(stun_sess, 
 					PJ_STUN_BINDING_REQUEST, PJ_STUN_MAGIC,
 					NULL, &check->tdata);
     if (status != PJ_SUCCESS) {
@@ -1805,14 +2207,27 @@ static pj_status_t perform_check(pj_ice_sess *ice,
      */
 
     /* Initiate STUN transaction to send the request */
-    status = pj_stun_session_send_msg(comp->stun_sess, msg_data, PJ_FALSE, 
+    status = pj_stun_session_send_msg(stun_sess, msg_data, PJ_FALSE, 
 				      PJ_TRUE, &rcand->addr, 
 				      sizeof(pj_sockaddr_in), check->tdata);
-    if (status != PJ_SUCCESS) {
+    if (status != PJ_SUCCESS && status != PJ_EPENDING) {
 	check->tdata = NULL;
 	pjnath_perror(ice->obj_name, "Error sending STUN request", status);
+#if 1
+	if (pj_ice_strans_tp_is_upnp_tcp(lcand->transport_id) && 
+		(status == PJ_EIGNORED || status == PJ_EINVAL)) {
+		check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_IN_PROGRESS, 
+					PJ_SUCCESS);
+		return PJ_SUCCESS;
+	}
+	check->tdata = NULL;
+#endif
 	return status;
-    }
+	}
+
+	LOG5((ice->obj_name, 
+		"[%s] Try to send connectivity check for check %s", 
+		pj_stun_tsx_get_obj_name(check->tdata->client_tsx), dump_check(ice->tmp.txt, sizeof(ice->tmp.txt), clist, check)));
 
     check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_IN_PROGRESS, 
 	            PJ_SUCCESS);
@@ -1834,9 +2249,14 @@ static pj_status_t start_periodic_check(pj_timer_heap_t *th,
 
     td = (struct timer_data*) te->user_data;
     ice = td->ice;
-    clist = td->clist;
+	clist = td->clist;
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	pj_grp_lock_release(ice->grp_lock);
+	return PJ_SUCCESS;
+    }
 
     /* Set timer ID to FALSE first */
     te->id = PJ_FALSE;
@@ -1855,7 +2275,7 @@ static pj_status_t start_periodic_check(pj_timer_heap_t *th,
 	if (check->state == PJ_ICE_SESS_CHECK_STATE_WAITING) {
 	    status = perform_check(ice, clist, i, ice->is_nominating);
 	    if (status != PJ_SUCCESS) {
-		pj_mutex_unlock(ice->mutex);
+		pj_grp_lock_release(ice->grp_lock);
 		return status;
 	    }
 
@@ -1874,7 +2294,7 @@ static pj_status_t start_periodic_check(pj_timer_heap_t *th,
 	    if (check->state == PJ_ICE_SESS_CHECK_STATE_FROZEN) {
 		status = perform_check(ice, clist, i, ice->is_nominating);
 		if (status != PJ_SUCCESS) {
-		    pj_mutex_unlock(ice->mutex);
+		    pj_grp_lock_release(ice->grp_lock);
 		    return status;
 		}
 
@@ -1890,12 +2310,12 @@ static pj_status_t start_periodic_check(pj_timer_heap_t *th,
 	/* Schedule for next timer */
 	pj_time_val timeout = {0, PJ_ICE_TA_VAL};
 
-	te->id = PJ_TRUE;
 	pj_time_val_normalize(&timeout);
-	pj_timer_heap_schedule(th, te, &timeout);
+	pj_timer_heap_schedule_w_grp_lock(th, te, &timeout, PJ_TRUE,
+	                                  ice->grp_lock);
     }
 
-    pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
     return PJ_SUCCESS;
 }
 
@@ -1909,12 +2329,13 @@ static void start_nominated_check(pj_ice_sess *ice)
 
     LOG4((ice->obj_name, "Starting nominated check.."));
 
-    pj_assert(ice->is_nominating == PJ_FALSE);
+	if (ice->is_nominating) // dean : To avoid re-enter nominated check.
+		return;
 
     /* Stop our timer if it's active */
     if (ice->timer.id == TIMER_START_NOMINATED_CHECK) {
-	pj_timer_heap_cancel(ice->stun_cfg.timer_heap, &ice->timer);
-	ice->timer.id = TIMER_NONE;
+	pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap, &ice->timer,
+	                               TIMER_NONE);
     }
 
     /* For each component, set the check state of valid check with
@@ -1942,18 +2363,15 @@ static void start_nominated_check(pj_ice_sess *ice)
     }
 
     /* And (re)start the periodic check */
-    if (ice->clist.timer.id) {
-	pj_timer_heap_cancel(ice->stun_cfg.timer_heap, &ice->clist.timer);
-	ice->clist.timer.id = PJ_FALSE;
-    }
+    pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap,
+                                   &ice->clist.timer, PJ_FALSE);
 
-    ice->clist.timer.id = PJ_TRUE;
     delay.sec = delay.msec = 0;
-    status = pj_timer_heap_schedule(ice->stun_cfg.timer_heap, 
-				    &ice->clist.timer, &delay);
-    if (status != PJ_SUCCESS) {
-	ice->clist.timer.id = PJ_FALSE;
-    } else {
+    status = pj_timer_heap_schedule_w_grp_lock(ice->stun_cfg.timer_heap,
+                                               &ice->clist.timer, &delay,
+                                               PJ_TRUE,
+                                               ice->grp_lock);
+    if (status == PJ_SUCCESS) {
 	LOG5((ice->obj_name, "Periodic timer rescheduled.."));
     }
 
@@ -1980,13 +2398,17 @@ const pj_str_t *find_str(const pj_str_t *strlist[], unsigned count,
     return NULL;
 }
 
+PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
+{
+	return pj_ice_sess_start_check2(ice, 0);
+}
 
 /*
  * Start ICE periodic check. This function will return immediately, and
  * application will be notified about the connectivity check status in
  * #pj_ice_sess_cb callback.
  */
-PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
+PJ_DEF(pj_status_t) pj_ice_sess_start_check2(pj_ice_sess *ice, pj_bool_t check_cached_list)
 {
     pj_ice_sess_checklist *clist;
     const pj_ice_sess_cand *cand0;
@@ -1996,13 +2418,21 @@ PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
     pj_time_val delay;
     pj_status_t status;
 
-    PJ_ASSERT_RETURN(ice, PJ_EINVAL);
+    if (!ice)
+        return PJ_EINVAL;
+    //PJ_ASSERT_RETURN(ice, PJ_EINVAL);
 
-    /* Checklist must have been created */
-    PJ_ASSERT_RETURN(ice->clist.count > 0, PJ_EINVALIDOP);
+	if (check_cached_list)
+		if (ice->clist.count == 0)
+			return PJ_EINVALIDOP;
+		//PJ_ASSERT_RETURN(ice->cached_clist.count > 0, PJ_EINVALIDOP);
+	else
+		if (ice->clist.count == 0)
+			return PJ_EINVALIDOP;
+		//PJ_ASSERT_RETURN(ice->clist.count > 0, PJ_EINVALIDOP);
 
     /* Lock session */
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
 
     LOG4((ice->obj_name, "Starting ICE check.."));
 
@@ -2021,8 +2451,10 @@ PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
      *    component ID to Waiting.  If there is more than one such pair,
      *    the one with the highest priority is used.
      */
-
-    clist = &ice->clist;
+	if (check_cached_list)
+		clist = &ice->cached_clist;
+	else
+		clist = &ice->clist;
 
     /* Pickup the first pair for component 1. */
     for (i=0; i<clist->count; ++i) {
@@ -2031,7 +2463,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
     }
     if (i == clist->count) {
 	pj_assert(!"Unable to find checklist for component 1");
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return PJNATH_EICEINCOMPID;
     }
 
@@ -2045,26 +2477,43 @@ PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
 
     cand0 = clist->checks[i].lcand;
     flist[flist_cnt++] = &clist->checks[i].lcand->foundation;
-
+#if 1
     /* Find all of the other pairs in that check list with the same
      * component ID, but different foundations, and sets all of their
      * states to Waiting as well.
      */
     for (++i; i<clist->count; ++i) {
-	const pj_ice_sess_cand *cand1;
+		const pj_ice_sess_cand *cand1;
 
-	cand1 = clist->checks[i].lcand;
+		cand1 = clist->checks[i].lcand;
 
-	if (cand1->comp_id==cand0->comp_id &&
-	    find_str(flist, flist_cnt, &cand1->foundation)==NULL)
-	{
-	    if (clist->checks[i].state == PJ_ICE_SESS_CHECK_STATE_FROZEN) {
-		check_set_state(ice, &clist->checks[i], 
-				PJ_ICE_SESS_CHECK_STATE_WAITING, PJ_SUCCESS);
-	    }
-	    flist[flist_cnt++] = &cand1->foundation;
-	}
+		if (cand1->comp_id==cand0->comp_id &&
+			find_str(flist, flist_cnt, &cand1->foundation)==NULL)
+		{
+			if (clist->checks[i].state == PJ_ICE_SESS_CHECK_STATE_FROZEN) {
+			check_set_state(ice, &clist->checks[i], 
+					PJ_ICE_SESS_CHECK_STATE_WAITING, PJ_SUCCESS);
+			}
+			flist[flist_cnt++] = &cand1->foundation;
+		}
     }
+#endif
+
+	for (i = 0; i < clist->count; i++)
+	{
+		const pj_ice_sess_cand *cand;
+
+		cand = clist->checks[i].lcand;
+		// 2013-10-23 DEAN. If candidate type is TCP but tcp session not ready, 
+		// set this check to failed.
+		if ((cand->type == PJ_ICE_CAND_TYPE_HOST_TCP || 
+			cand->type == PJ_ICE_CAND_TYPE_SRFLX_TCP) && 
+			!clist->checks[i].tcp_sess_ready)
+		{
+			check_set_state(ice, &clist->checks[i], 
+				PJ_ICE_SESS_CHECK_STATE_FAILED, PJ_SUCCESS);
+		}
+	}
 
     /* First, perform all pending triggered checks, simultaneously. */
     rcheck = ice->early_check.next;
@@ -2077,6 +2526,9 @@ PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
     }
     pj_list_init(&ice->early_check);
 
+    pj_timer_heap_cancel_if_active(ice->stun_cfg.timer_heap,
+                                   &ice->timer, PJ_FALSE);
+
     /* Start periodic check */
     /* We could start it immediately like below, but lets schedule timer 
      * instead to reduce stack usage:
@@ -2084,13 +2536,14 @@ PJ_DEF(pj_status_t) pj_ice_sess_start_check(pj_ice_sess *ice)
      */
     clist->timer.id = PJ_TRUE;
     delay.sec = delay.msec = 0;
-    status = pj_timer_heap_schedule(ice->stun_cfg.timer_heap, 
-				    &clist->timer, &delay);
+    status = pj_timer_heap_schedule_w_grp_lock(ice->stun_cfg.timer_heap,
+                                               &clist->timer, &delay,
+                                               PJ_TRUE, ice->grp_lock);
     if (status != PJ_SUCCESS) {
 	clist->timer.id = PJ_FALSE;
     }
 
-    pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
     return status;
 }
 
@@ -2109,15 +2562,40 @@ static pj_status_t on_stun_send_msg(pj_stun_session *sess,
 {
     stun_data *sd = (stun_data*) pj_stun_session_get_user_data(sess);
     pj_ice_sess *ice = sd->ice;
-    pj_ice_msg_data *msg_data = (pj_ice_msg_data*) token;
+	pj_ice_msg_data *msg_data = (pj_ice_msg_data*) token;
+	pj_ice_sess_comp *comp;
+	pj_status_t status;
+	int tcp_sess_idx = -1;
     
-    return (*ice->cb.on_tx_pkt)(ice, sd->comp_id, msg_data->transport_id,
-				pkt, pkt_size, dst_addr, addr_len);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	/* Stray retransmit timer that could happen while
+	 * we're being destroyed */
+	pj_grp_lock_release(ice->grp_lock);
+	return PJ_EINVALIDOP;
+    }
+
+	comp = ice->comp;
+	if (comp->valid_check != NULL) {
+		tcp_sess_idx = comp->valid_check->tcp_sess_idx;
+	}
+    
+	if (pj_stun_session_use_tcp(sess) && msg_data->transport_id == 3) {
+		status = (*ice->cb.on_tx_pkt2)(ice, sd->comp_id, msg_data->transport_id,
+			pkt, pkt_size, dst_addr, addr_len, pj_stun_session_get_user_data(sess), 
+			tcp_sess_idx);
+	} else {
+		status = (*ice->cb.on_tx_pkt)(ice, sd->comp_id, msg_data->transport_id,
+			pkt, pkt_size, dst_addr, addr_len, tcp_sess_idx);
+	}
+    pj_grp_lock_release(ice->grp_lock);
+    return status;
 }
 
 
 /* This callback is called when outgoing STUN request completed */
-static void on_stun_request_complete(pj_stun_session *stun_sess,
+void on_stun_request_complete(pj_stun_session *stun_sess,
 				     pj_status_t status,
 				     void *token,
 				     pj_stun_tx_data *tdata,
@@ -2144,10 +2622,19 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
     
 
     /* Mark STUN transaction as complete */
-    pj_assert(tdata == check->tdata);
+	// DEAN. 
+    //pj_assert(tdata == check->tdata)
+	if (tdata != check->tdata)
+		return;
     check->tdata = NULL;
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	/* Not sure if this is possible but just in case */
+	pj_grp_lock_release(ice->grp_lock);
+	return;
+    }
 
     /* Init lcand to NULL. lcand will be found from the mapped address
      * found in the response.
@@ -2196,7 +2683,7 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
 	    check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_WAITING, 0);
 	    perform_check(ice, clist, msg_data->data.req.ckid, 
 			  check->nominated || ice->is_nominating);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return;
 	}
 
@@ -2210,7 +2697,7 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
 
 	check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_FAILED, status);
 	on_check_complete(ice, check);
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return;
     }
 
@@ -2223,7 +2710,16 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
      * the response match the source IP address and port that the Binding
      * Request was sent from.
      */
-    if (sockaddr_cmp(&check->rcand->addr, (const pj_sockaddr*)src_addr) != 0) {
+	// DEAN TODO
+	{
+		char addrbuf1[PJ_INET6_ADDRSTRLEN+10];
+		char addrbuf2[PJ_INET6_ADDRSTRLEN+10];
+		LOG4((THIS_FILE, "~~~~~~~~~~~~check->rcand->addr=%s, src_addr=%s",
+			pj_sockaddr_print(&check->rcand->addr, addrbuf1, sizeof(addrbuf1), 3),
+			pj_sockaddr_print(src_addr, addrbuf2, sizeof(addrbuf2), 3)));
+	}
+    if (//!pj_ice_strans_tp_is_upnp_tcp(check->lcand->transport_id) && 
+		sockaddr_cmp(&check->rcand->addr, (const pj_sockaddr*)src_addr) != 0) {
 	status = PJNATH_EICEINSRCADDR;
 	LOG4((ice->obj_name, 
 	     "Check %s%s: connectivity check FAILED: source address mismatch",
@@ -2232,7 +2728,7 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
 	     (check->nominated ? " (nominated)" : " (not nominated)")));
 	check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_FAILED, status);
 	on_check_complete(ice, check);
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return;
     }
 
@@ -2265,7 +2761,7 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
 	check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_FAILED, 
 			PJNATH_ESTUNNOMAPPEDADDR);
 	on_check_complete(ice, check);
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return;
     }
 
@@ -2284,9 +2780,10 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
      * any of the local candidates that the agent knows about, the mapped 
      * address represents a new candidate - a peer reflexive candidate.
      */
-    if (lcand == NULL) {
+    if (lcand == NULL ) {
 	unsigned cand_id;
 	pj_str_t foundation;
+	pj_time_val adding_time;
 
 	pj_ice_calc_foundation(ice->pool, &foundation, PJ_ICE_CAND_TYPE_PRFLX,
 			       &check->lcand->base_addr);
@@ -2300,6 +2797,7 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
 	 * get the priority from the PRIORITY attribute.
 	 */
 
+	pj_gettimeofday(&adding_time);
 	/* Add new peer reflexive candidate */
 	status = pj_ice_sess_add_cand(ice, check->lcand->comp_id, 
 				      msg_data->transport_id,
@@ -2308,12 +2806,16 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
 				      &xaddr->sockaddr, 
 				      &check->lcand->base_addr, 
 				      &check->lcand->base_addr,
-				      sizeof(pj_sockaddr_in), &cand_id);
+				      sizeof(pj_sockaddr_in), &cand_id,
+					  check->lcand->tcp_type,
+					  adding_time,
+					  adding_time,
+					  PJ_TRUE);
 	if (status != PJ_SUCCESS) {
 	    check_set_state(ice, check, PJ_ICE_SESS_CHECK_STATE_FAILED, 
 			    status);
 	    on_check_complete(ice, check);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return;
 	}
 
@@ -2338,17 +2840,20 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
     }
 
     if (i==ice->valid_list.count) {
-	pj_assert(ice->valid_list.count < PJ_ICE_MAX_CHECKS);
-	new_check = &ice->valid_list.checks[ice->valid_list.count++];
-	new_check->lcand = lcand;
-	new_check->rcand = check->rcand;
-	new_check->prio = CALC_CHECK_PRIO(ice, lcand, check->rcand);
-	new_check->state = PJ_ICE_SESS_CHECK_STATE_SUCCEEDED;
-	new_check->nominated = check->nominated;
-	new_check->err_code = PJ_SUCCESS;
+		pj_assert(ice->valid_list.count < PJ_ICE_MAX_CHECKS);
+		new_check = &ice->valid_list.checks[ice->valid_list.count++];
+		new_check->lcand = lcand;
+		new_check->rcand = check->rcand;
+		new_check->prio = CALC_CHECK_PRIO(ice, lcand, check->rcand);
+		new_check->state = PJ_ICE_SESS_CHECK_STATE_SUCCEEDED;
+		new_check->nominated = check->nominated;
+		new_check->local_path = check->local_path;
+		new_check->tcp_sess_idx = check->tcp_sess_idx;
+		new_check->err_code = PJ_SUCCESS;
     } else {
-	new_check = &ice->valid_list.checks[i];
-	ice->valid_list.checks[i].nominated = check->nominated;
+		new_check = &ice->valid_list.checks[i];
+		ice->valid_list.checks[i].nominated = check->nominated;
+		ice->valid_list.checks[i].local_path = check->local_path;
     }
 
     /* Update valid check and nominated check for the component */
@@ -2373,18 +2878,18 @@ static void on_stun_request_complete(pj_stun_session *stun_sess,
      */
     if (on_check_complete(ice, check)) {
 	/* ICE complete! */
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return;
     }
 
-    pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
 }
 
 
 /* This callback is called by the STUN session associated with a candidate
  * when it receives incoming request.
  */
-static pj_status_t on_stun_rx_request(pj_stun_session *sess,
+pj_status_t on_stun_rx_request(pj_stun_session *sess,
 				      const pj_uint8_t *pkt,
 				      unsigned pkt_len,
 				      const pj_stun_rx_data *rdata,
@@ -2418,7 +2923,12 @@ static pj_status_t on_stun_rx_request(pj_stun_session *sess,
     sd = (stun_data*) pj_stun_session_get_user_data(sess);
     ice = sd->ice;
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	pj_grp_lock_release(ice->grp_lock);
+	return PJ_EINVALIDOP;
+    }
 
     /*
      * Note:
@@ -2433,7 +2943,7 @@ static pj_status_t on_stun_rx_request(pj_stun_session *sess,
 	        pj_stun_msg_find_attr(msg, PJ_STUN_ATTR_PRIORITY, 0);
     if (prio_attr == NULL) {
 	LOG5((ice->obj_name, "Received Binding request with no PRIORITY"));
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return PJ_SUCCESS;
     }
 
@@ -2478,7 +2988,7 @@ static pj_status_t on_stun_rx_request(pj_stun_session *sess,
 	    pj_stun_session_respond(sess, rdata, PJ_STUN_SC_ROLE_CONFLICT, 
 				    NULL, token, PJ_TRUE, 
 				    src_addr, src_addr_len);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return PJ_SUCCESS;
 	}
 
@@ -2490,7 +3000,7 @@ static pj_status_t on_stun_rx_request(pj_stun_session *sess,
 	    pj_stun_session_respond(sess, rdata, PJ_STUN_SC_ROLE_CONFLICT, 
 				    NULL, token, PJ_TRUE, 
 				    src_addr, src_addr_len);
-	    pj_mutex_unlock(ice->mutex);
+	    pj_grp_lock_release(ice->grp_lock);
 	    return PJ_SUCCESS;
 	} else {
 	    /* Switch role to controlled */
@@ -2505,7 +3015,7 @@ static pj_status_t on_stun_rx_request(pj_stun_session *sess,
      */
     status = pj_stun_session_create_res(sess, rdata, 0, NULL, &tdata);
     if (status != PJ_SUCCESS) {
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return status;
     }
 
@@ -2557,7 +3067,7 @@ static pj_status_t on_stun_rx_request(pj_stun_session *sess,
 	handle_incoming_check(ice, rcheck);
     }
 
-    pj_mutex_unlock(ice->mutex);
+    pj_grp_lock_release(ice->grp_lock);
     return PJ_SUCCESS;
 }
 
@@ -2572,7 +3082,7 @@ static void handle_incoming_check(pj_ice_sess *ice,
     pj_ice_sess_comp *comp;
     pj_ice_sess_cand *lcand = NULL;
     pj_ice_sess_cand *rcand;
-    unsigned i;
+    unsigned i, j;
 
     comp = find_comp(ice, rcheck->comp_id);
 
@@ -2709,7 +3219,7 @@ static void handle_incoming_check(pj_ice_sess *ice,
 	     */
 	    LOG5((ice->obj_name, "Triggered check for check %d not performed "
 		  "because it's in progress. Retransmitting", i));
-	    pj_stun_session_retransmit_req(comp->stun_sess, c->tdata);
+	    pj_stun_session_retransmit_req(comp->stun_sess, c->tdata, PJ_FALSE);
 
 	} else if (c->state == PJ_ICE_SESS_CHECK_STATE_SUCCEEDED) {
 	    /* Check complete for this component.
@@ -2760,20 +3270,105 @@ static void handle_incoming_check(pj_ice_sess *ice,
     else if (ice->clist.count < PJ_ICE_MAX_CHECKS) {
 
 	pj_ice_sess_check *c = &ice->clist.checks[ice->clist.count];
+	pj_ice_sess_check *new_check;
 	pj_bool_t nominate;
 
 	c->lcand = lcand;
 	c->rcand = rcand;
 	c->prio = CALC_CHECK_PRIO(ice, lcand, rcand);
-	c->state = PJ_ICE_SESS_CHECK_STATE_WAITING;
-	c->nominated = rcheck->use_candidate;
+	// natnl
+	if (!pj_ice_strans_tp_is_upnp_tcp(lcand->transport_id) || 
+		ice->role == PJ_ICE_SESS_ROLE_CONTROLLING) {
+		c->state = PJ_ICE_SESS_CHECK_STATE_WAITING;
+		c->nominated = rcheck->use_candidate;
+		LOG4((ice->obj_name, "New triggered check added: %d", 
+			ice->clist.count));
+	} else {
+		c->state = PJ_ICE_SESS_CHECK_STATE_SUCCEEDED;
+		c->nominated = PJ_TRUE;
+		LOG4((ice->obj_name, "New triggered check added(UPNP TCP): %d", 
+			ice->clist.count));
+
+
+		/* Add pair to valid list, if it's not there, otherwise just update
+		 * nominated flag
+		 */
+		for (i=0; i<ice->valid_list.count; ++i) {
+		if (ice->valid_list.checks[i].lcand == lcand &&
+			ice->valid_list.checks[i].rcand == rcand)
+			break;
+		}
+
+		if (i==ice->valid_list.count) {
+		pj_assert(ice->valid_list.count < PJ_ICE_MAX_CHECKS);
+		new_check = &ice->valid_list.checks[ice->valid_list.count++];
+		new_check->lcand = lcand;
+		new_check->rcand = rcand;
+		new_check->prio = CALC_CHECK_PRIO(ice, lcand, rcand);
+		new_check->state = PJ_ICE_SESS_CHECK_STATE_SUCCEEDED;
+		new_check->nominated = c->nominated;
+		new_check->local_path = (lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+			(lcand->tcp_type == rcand->tcp_type)) || 
+			(lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+			rcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_NONE);
+		new_check->err_code = PJ_SUCCESS;
+		
+		} else {
+		new_check = &ice->valid_list.checks[i];
+		ice->valid_list.checks[i].nominated = c->nominated;
+		ice->valid_list.checks[i].local_path = (lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+			(lcand->tcp_type == rcand->tcp_type)) || 
+			(lcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_ACTIVE && 
+			rcand->tcp_type == PJ_ICE_CAND_TCP_TYPE_NONE);
+		}
+
+
+#if 1   //DEAN. Fix multiple tcp session make data transfer failed.
+		//2014-06-11. But this will cause data transfer failed on (max_calls+1) time tunnel building.
+		//2014-06-12. The root cause is that UAS's accept session doesn't be destroyed.
+		/* Update valid check and nominated check for the component */
+		update_comp_check(ice, new_check->lcand->comp_id, new_check);
+		// mark check success to avoid ice_on_complete not be called.
+		on_check_complete(ice, c);
+#else
+		PJ_LOG(4, (ice->obj_name, "New_check %s", 
+			dump_check(ice->tmp.txt, sizeof(ice->tmp.txt), 
+			&ice->clist, new_check)));
+		for (j=0; j<ice->clist.count; j++)
+		{
+			pj_ice_sess_check * check = &ice->clist.checks[j];
+			pj_ice_sess_cand *clist_lcand = check->lcand;
+			pj_ice_sess_cand *clist_rcand = new_check->rcand;
+			pj_ice_sess_cand new_chk_rcand = *new_check->rcand;
+			pj_ice_sess_cand chk_rcand = *clist_rcand;
+			PJ_LOG(4, (ice->obj_name, "Clist_check      %s", 
+				dump_check(ice->tmp.txt, sizeof(ice->tmp.txt), 
+				&ice->clist, check)));
+			// 2013-11-22 DEAN, reset rcand port for compare
+			pj_sockaddr_set_port(&new_chk_rcand.addr, 0);
+			pj_sockaddr_set_port(&chk_rcand.addr, 0);
+			if (pj_sockaddr_cmp(&new_check->lcand->addr, &clist_lcand->addr) == 0 &&
+				pj_sockaddr_cmp(&new_chk_rcand.addr, &chk_rcand.addr) == 0)
+			{
+				new_check->tcp_sess_idx = ice->clist.checks[j].tcp_sess_idx;
+				/* Update valid check and nominated check for the component */
+				update_comp_check(ice, new_check->lcand->comp_id, new_check);
+				// mark check success to avoid ice_on_complete not be called.
+				on_check_complete(ice, c);
+			}
+		}
+#endif
+	}
 	c->err_code = PJ_SUCCESS;
 
 	nominate = (c->nominated || ice->is_nominating);
 
-	LOG4((ice->obj_name, "New triggered check added: %d", 
-	     ice->clist.count));
-	perform_check(ice, &ice->clist, ice->clist.count++, nominate);
+	//LOG4((ice->obj_name, "New triggered check added: %d", 
+	//     ice->clist.count));
+
+	// natnl
+	if (c->state == PJ_ICE_SESS_CHECK_STATE_WAITING)
+		perform_check(ice, &ice->clist, ice->clist.count++, nominate);
 
     } else {
 	LOG4((ice->obj_name, "Error: unable to perform triggered check: "
@@ -2782,7 +3377,7 @@ static void handle_incoming_check(pj_ice_sess *ice,
 }
 
 
-static pj_status_t on_stun_rx_indication(pj_stun_session *sess,
+pj_status_t on_stun_rx_indication(pj_stun_session *sess,
 					 const pj_uint8_t *pkt,
 					 unsigned pkt_len,
 					 const pj_stun_msg *msg,
@@ -2823,6 +3418,8 @@ PJ_DEF(pj_status_t) pj_ice_sess_send_data(pj_ice_sess *ice,
     pj_status_t status = PJ_SUCCESS;
     pj_ice_sess_comp *comp;
     pj_ice_sess_cand *cand;
+    pj_uint8_t transport_id;
+    pj_sockaddr addr;
 
     PJ_ASSERT_RETURN(ice && comp_id, PJ_EINVAL);
     
@@ -2833,51 +3430,72 @@ PJ_DEF(pj_status_t) pj_ice_sess_send_data(pj_ice_sess *ice,
 	return PJNATH_EICEINCOMPID;
     }
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	pj_grp_lock_release(ice->grp_lock);
+	return PJ_EINVALIDOP;
+    }
 
     comp = find_comp(ice, comp_id);
     if (comp == NULL) {
 	status = PJNATH_EICEINCOMPID;
+	pj_grp_lock_release(ice->grp_lock);
 	goto on_return;
     }
 
-    if (comp->valid_check == NULL) {
+    if (comp->nominated_check == NULL) { // DEAN changed to use nominated_check
 	status = PJNATH_EICEINPROGRESS;
+	pj_grp_lock_release(ice->grp_lock);
 	goto on_return;
     }
 
-    cand = comp->valid_check->lcand;
-    status = (*ice->cb.on_tx_pkt)(ice, comp_id, cand->transport_id, 
+    cand = comp->nominated_check->lcand; // DEAN changed to use nominated_check
+    transport_id = cand->transport_id;
+    pj_sockaddr_cp(&addr, &comp->nominated_check->rcand->addr); // DEAN changed to use nominated_check
+
+    /* Release the mutex now to avoid deadlock (see ticket #1451). */
+    pj_grp_lock_release(ice->grp_lock);
+
+    PJ_RACE_ME(5);
+
+    status = (*ice->cb.on_tx_pkt)(ice, comp_id, transport_id, 
 				  data, data_len, 
-				  &comp->valid_check->rcand->addr, 
-				  sizeof(pj_sockaddr_in));
+				  &addr, 
+				  sizeof(pj_sockaddr_in),
+				  comp->nominated_check->tcp_sess_idx);
 
 on_return:
-    pj_mutex_unlock(ice->mutex);
     return status;
 }
 
 
-PJ_DEF(pj_status_t) pj_ice_sess_on_rx_pkt(pj_ice_sess *ice,
+PJ_DEF(pj_status_t) pj_ice_sess_on_rx_pkt2(pj_ice_sess *ice,
 					  unsigned comp_id,
 					  unsigned transport_id,
 					  void *pkt,
 					  pj_size_t pkt_size,
 					  const pj_sockaddr_t *src_addr,
-					  int src_addr_len)
+					  int src_addr_len,
+					  pj_stun_session *stun_sess)
 {
     pj_status_t status = PJ_SUCCESS;
     pj_ice_sess_comp *comp;
     pj_ice_msg_data *msg_data = NULL;
-    unsigned i;
+    unsigned i, options;
 
     PJ_ASSERT_RETURN(ice, PJ_EINVAL);
 
-    pj_mutex_lock(ice->mutex);
+    pj_grp_lock_acquire(ice->grp_lock);
+
+    if (ice->is_destroying) {
+	pj_grp_lock_release(ice->grp_lock);
+	return PJ_EINVALIDOP;
+    }
 
     comp = find_comp(ice, comp_id);
     if (comp == NULL) {
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return PJNATH_EICEINCOMPID;
     }
 
@@ -2890,7 +3508,7 @@ PJ_DEF(pj_status_t) pj_ice_sess_on_rx_pkt(pj_ice_sess *ice,
     }
     if (msg_data == NULL) {
 	pj_assert(!"Invalid transport ID");
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
 	return PJ_EINVAL;
     }
 
@@ -2898,24 +3516,43 @@ PJ_DEF(pj_status_t) pj_ice_sess_on_rx_pkt(pj_ice_sess *ice,
      * packets. We don't need to verify the STUN packet too rigorously, that
      * will be done by the user.
      */
+	// DEAN
+	options = PJ_STUN_NO_FINGERPRINT_CHECK;
+	if (!pj_ice_strans_tp_is_upnp_tcp(transport_id)) //TP_UPNP_TCP
+		options |= PJ_STUN_IS_DATAGRAM;
+
     status = pj_stun_msg_check((const pj_uint8_t*)pkt, pkt_size, 
-    			       PJ_STUN_IS_DATAGRAM |
-    			         PJ_STUN_NO_FINGERPRINT_CHECK);
-    if (status == PJ_SUCCESS) {
-	status = pj_stun_session_on_rx_pkt(comp->stun_sess, pkt, pkt_size,
-					   PJ_STUN_IS_DATAGRAM, msg_data,
-					   NULL, src_addr, src_addr_len);
-	if (status != PJ_SUCCESS) {
-	    pj_strerror(status, ice->tmp.errmsg, sizeof(ice->tmp.errmsg));
-	    LOG4((ice->obj_name, "Error processing incoming message: %s",
-		  ice->tmp.errmsg));
-	}
-	pj_mutex_unlock(ice->mutex);
+    			       options);
+
+	options = 0;
+	if (!pj_ice_strans_tp_is_upnp_tcp(transport_id)) //TP_UPNP_TCP
+		options |= PJ_STUN_IS_DATAGRAM;
+
+
+	if(status == PJ_SUCCESS) {
+		if (!pj_ice_strans_tp_is_upnp_tcp(transport_id)) {
+			if (comp->stun_sess) // To avoid stun session destroy.
+				status = pj_stun_session_on_rx_pkt(comp->stun_sess, pkt, pkt_size,
+					options, msg_data,
+					NULL, src_addr, src_addr_len);
+			else
+				status = PJ_SUCCESS;
+		} else {
+			if (comp->stun_sess) // To avoid stun session destroy.
+				status = pj_stun_session_on_rx_pkt(stun_sess, pkt, pkt_size,
+					options, msg_data,
+					NULL, src_addr, src_addr_len);
+			else
+				status = PJ_SUCCESS;
+		}
+	pj_grp_lock_release(ice->grp_lock);
     } else {
 	/* Not a STUN packet. Call application's callback instead, but release
 	 * the mutex now or otherwise we may get deadlock.
 	 */
-	pj_mutex_unlock(ice->mutex);
+	pj_grp_lock_release(ice->grp_lock);
+
+	PJ_RACE_ME(5);
 
 	(*ice->cb.on_rx_data)(ice, comp_id, transport_id, pkt, pkt_size, 
 			      src_addr, src_addr_len);
@@ -2925,4 +3562,25 @@ PJ_DEF(pj_status_t) pj_ice_sess_on_rx_pkt(pj_ice_sess *ice,
     return status;
 }
 
+PJ_DEF(pj_status_t) pj_ice_sess_on_rx_pkt(pj_ice_sess *ice,
+										  unsigned comp_id,
+										  unsigned transport_id,
+										  void *pkt,
+										  pj_size_t pkt_size,
+										  const pj_sockaddr_t *src_addr,
+										  int src_addr_len) 
+{
+	return pj_ice_sess_on_rx_pkt2(ice, comp_id, transport_id, pkt, pkt_size,
+		src_addr, src_addr_len, NULL);
+}
 
+PJ_DEF(pj_bool_t) pj_ice_sess_local_path_selected(pj_ice_sess *ice) 
+{
+	int i;
+	for (i = 0; i < ice->valid_list.count; i++)
+	{
+		if (ice->valid_list.checks[i].nominated)
+			return ice->valid_list.checks[i].local_path;
+	}
+	return PJ_FALSE;
+}

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: jbuf_test.c 3814 2011-10-13 09:02:41Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -198,8 +198,8 @@ int jbuf_main(void)
 	return -1;
     }
 
-    old_log_level = pj_log_get_level();
-    pj_log_set_level(5);
+    old_log_level = pj_log_get_level(0);
+    pj_log_set_level(0, 5);
 
     while (rc == 0 && !data_eof) {
 	pj_str_t jb_name = {"JBTEST", 6};
@@ -343,7 +343,7 @@ int jbuf_main(void)
     }
 
     fclose(input);
-    pj_log_set_level(old_log_level);
+    pj_log_set_level(0, old_log_level);
 
     return rc;
 }

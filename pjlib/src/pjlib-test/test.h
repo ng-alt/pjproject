@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: test.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -75,7 +75,7 @@ PJ_BEGIN_DECL
 
 extern int errno_test(void);
 extern int timestamp_test(void);
-extern int exception_test(void);
+extern int exception_test(int inst_id);
 extern int rand_test(void);
 extern int list_test(void);
 extern int hash_test(void);

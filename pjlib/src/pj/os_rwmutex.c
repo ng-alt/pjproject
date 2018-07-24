@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_rwmutex.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -42,6 +42,7 @@ struct pj_rwmutex_t
      */
     pj_sem_t   *write_lock;
     pj_int32_t  reader_count;
+	int inst_id;
 };
 
 /*
@@ -58,6 +59,7 @@ PJ_DEF(pj_status_t) pj_rwmutex_create(pj_pool_t *pool, const char *name,
 
     *p_mutex = NULL;
     rwmutex = PJ_POOL_ALLOC_T(pool, pj_rwmutex_t);
+	rwmutex->inst_id = pool->factory->inst_id;
 
     status = pj_mutex_create_simple(pool, name, &rwmutex ->read_lock);
     if (status != PJ_SUCCESS)

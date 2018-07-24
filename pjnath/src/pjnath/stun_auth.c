@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_auth.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -294,6 +294,12 @@ PJ_DEF(pj_status_t) pj_stun_authenticate_request(const pj_uint8_t *pkt,
     /* Next check that USERNAME is present */
     auser = (const pj_stun_username_attr*)
 	    pj_stun_msg_find_attr(msg, PJ_STUN_ATTR_USERNAME, 0);
+	PJ_LOG(4, ("", "pj_stun_authenticate_request() [un=%.*s] [tid=%08x%08x%08x]", 
+		auser->value.slen, 
+		auser->value.ptr,
+		pj_ntohl(*(pj_uint32_t*)&msg->hdr.tsx_id[0]),
+		pj_ntohl(*(pj_uint32_t*)&msg->hdr.tsx_id[4]),
+		pj_ntohl(*(pj_uint32_t*)&msg->hdr.tsx_id[8])));
     if (auser == NULL) {
 	/* According to rfc3489bis-10 Sec 10.1.2/10.2.2, we should return 400
 	   for both short and long term, since M-I is present.

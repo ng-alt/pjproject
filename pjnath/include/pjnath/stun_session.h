@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_session.h 4407 2013-02-27 15:02:03Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -30,6 +30,7 @@
 #include <pjnath/stun_config.h>
 #include <pjnath/stun_transaction.h>
 #include <pj/list.h>
+#include <pj/lock.h>
 #include <pj/timer.h>
 
 PJ_BEGIN_DECL
@@ -384,6 +385,8 @@ typedef enum pj_stun_sess_msg_log_flag
  *			name will be used for example for logging purpose.
  * @param cb		Session callback.
  * @param fingerprint	Enable message fingerprint for outgoing messages.
+ * @param grp_lock	Optional group lock to be used by this session.
+ * 			If NULL, the session will create one itself.
  * @param p_sess	Pointer to receive STUN session instance.
  *
  * @return	    PJ_SUCCESS on success, or the appropriate error code.
@@ -392,7 +395,31 @@ PJ_DECL(pj_status_t) pj_stun_session_create(pj_stun_config *cfg,
 					    const char *name,
 					    const pj_stun_session_cb *cb,
 					    pj_bool_t fingerprint,
+					    pj_grp_lock_t *grp_lock,
 					    pj_stun_session **p_sess);
+
+
+/**
+ * Create a STUN session.
+ *
+ * @param cfg		The STUN endpoint, to be used to register timers etc.
+ * @param name		Optional name to be associated with this instance. The
+ *			name will be used for example for logging purpose.
+ * @param cb		Session callback.
+ * @param fingerprint	Enable message fingerprint for outgoing messages.
+ * @param p_sess	Pointer to receive STUN session instance.
+ * @param use_tcp	use tcp or not.
+ *
+ * @return	    PJ_SUCCESS on success, or the appropriate error code.
+ */
+PJ_DECL(pj_status_t) pj_stun_session_create2(pj_stun_config *cfg,
+					    const char *name,
+					    const pj_stun_session_cb *cb,
+					    pj_bool_t fingerprint,
+					    pj_grp_lock_t *grp_lock,
+						pj_stun_session **p_sess,
+						pj_bool_t use_tcp,
+						void *stun_user_data2);
 
 /**
  * Destroy the STUN session and all objects created in the context of
@@ -420,6 +447,9 @@ PJ_DECL(pj_status_t) pj_stun_session_destroy(pj_stun_session *sess);
 PJ_DECL(pj_status_t) pj_stun_session_set_user_data(pj_stun_session *sess,
 						   void *user_data);
 
+PJ_DECL(pj_status_t) pj_stun_session_set_user_data2(pj_stun_session *sess,
+						   void *user_data);
+
 /**
  * Retrieve the user data previously associated to this STUN session with
  * pj_stun_session_set_user_data().
@@ -429,6 +459,17 @@ PJ_DECL(pj_status_t) pj_stun_session_set_user_data(pj_stun_session *sess,
  * @return	    The user data associated with this STUN session.
  */
 PJ_DECL(void*) pj_stun_session_get_user_data(pj_stun_session *sess);
+
+PJ_DECL(void*) pj_stun_session_get_user_data2(pj_stun_session *sess);
+
+/**
+ * Get the group lock for this STUN session.
+ *
+ * @param sess	    The STUN session instance.
+ *
+ * @return	    The group lock.
+ */
+PJ_DECL(pj_grp_lock_t *) pj_stun_session_get_grp_lock(pj_stun_session *sess);
 
 /**
  * Change the lock object used by the STUN session. By default, the STUN
@@ -682,6 +723,8 @@ PJ_DECL(pj_status_t) pj_stun_session_cancel_req(pj_stun_session *sess,
  *
  * @param sess	    The STUN session instance.
  * @param tdata	    The request message previously sent.
+ * @param mod_count Boolean flag to indicate whether transmission count
+ *                  needs to be incremented.
  *
  * @return	    PJ_SUCCESS on success, or the appropriate error.
  *		    This function will return PJNATH_ESTUNDESTROYED if 
@@ -689,7 +732,8 @@ PJ_DECL(pj_status_t) pj_stun_session_cancel_req(pj_stun_session *sess,
  *		    callback.
  */
 PJ_DECL(pj_status_t) pj_stun_session_retransmit_req(pj_stun_session *sess,
-						    pj_stun_tx_data *tdata);
+						    pj_stun_tx_data *tdata,
+                                                    pj_bool_t mod_count);
 
 
 /**
@@ -751,6 +795,9 @@ PJ_DECL(void) pj_stun_msg_destroy_tdata(pj_stun_session *sess,
 					pj_stun_tx_data *tdata);
 
 
+PJ_DECL(pj_bool_t) pj_stun_session_use_tcp(pj_stun_session *sess);
+
+PJ_DECL(void) pj_stun_session_cancel_timer(pj_stun_tx_data *tdata);
 /**
  * @}
  */

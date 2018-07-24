@@ -2,6 +2,12 @@ include ../../build.mak
 include ../../version.mak
 include $(PJDIR)/build/common.mak
 
+THIRD_PARTY:=$(PJDIR)/third_party
+
+UMEM_INC=$(CC_INC)$(THIRD_PARTY)/umem
+UMEM_LIBS=-L$(THIRD_PARTY)/lib -lumem-$(TARGET_NAME)
+UMEM_CFLAGS=-DUMEM_STANDALONE
+
 RULES_MAK := $(PJDIR)/build/rules.mak
 
 
@@ -11,24 +17,30 @@ export PJLIB_LIB := ../lib/libpj-$(TARGET_NAME)$(LIBEXT)
 # Gather all flags.
 #
 export _CFLAGS 	:= $(CC_CFLAGS) $(OS_CFLAGS) $(HOST_CFLAGS) $(M_CFLAGS) \
-		   $(CFLAGS) $(CC_INC)../include
+		   $(CFLAGS) \
+       $(UMEM_CFLAGS) \
+       $(CC_INC)../include \
+		   $(UMEM_INC)
 export _CXXFLAGS:= $(_CFLAGS) $(CC_CXXFLAGS) $(OS_CXXFLAGS) $(M_CXXFLAGS) \
 		   $(HOST_CXXFLAGS) $(CXXFLAGS)
 export _LDFLAGS := $(subst /,$(HOST_PSEP),$(PJLIB_LIB)) \
 		   $(CC_LDFLAGS) $(OS_LDFLAGS) $(M_LDFLAGS) $(HOST_LDFLAGS) \
-		   $(LDFLAGS) 
+		   $(LDFLAGS) \
+		   $(UMEM_LIBS)
 
 ###############################################################################
 # Defines for building PJLIB library
 #
 export PJLIB_SRCDIR = ../src/pj
 export PJLIB_OBJS += $(OS_OBJS) $(M_OBJS) $(CC_OBJS) $(HOST_OBJS) \
-	activesock.o array.o config.o ctype.o errno.o except.o fifobuf.o \
+	activesock.o array.o config.o ctype.o except.o fifobuf.o \
 	guid.o hash.o ip_helper_generic.o list.o lock.o log.o os_time_common.o \
 	os_info.o pool.o pool_buf.o pool_caching.o pool_dbg.o rand.o \
 	rbtree.o sock_common.o sock_qos_common.o sock_qos_bsd.o \
 	ssl_sock_common.o ssl_sock_ossl.o ssl_sock_dump.o \
-	string.o timer.o types.o
+	timer.o types.o \
+	errno_lib.o string.o bandwidth.o
+#charles move errno.o to errno_lib.o, string.o to string.o
 export PJLIB_CFLAGS += $(_CFLAGS)
 
 ###############################################################################

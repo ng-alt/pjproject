@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: types.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -81,10 +81,16 @@ typedef enum pjmedia_tp_proto
     PJMEDIA_TP_PROTO_NONE = 0,
 
     /** RTP using A/V profile */
-    PJMEDIA_TP_PROTO_RTP_AVP,
+	PJMEDIA_TP_PROTO_RTP_AVP,
 
-    /** Secure RTP */
-    PJMEDIA_TP_PROTO_RTP_SAVP,
+	/** Secure RTP */
+	PJMEDIA_TP_PROTO_RTP_SAVP,
+
+	/** WebRTC Data Channel DTLS_SCTP */
+	PJMEDIA_TP_PROTO_DTLS_SCTP,
+
+	/** RTP and SCTP */
+	PJMEDIA_TP_PROTO_RTP_SCTP,
 
     /** Unknown */
     PJMEDIA_TP_PROTO_UNKNOWN
@@ -157,7 +163,7 @@ typedef struct pjmedia_stream pjmedia_stream;
 typedef struct pjmedia_sock_info
 {
     /** The RTP socket handle */
-    pj_sock_t	    rtp_sock;
+	pj_sock_t	    rtp_sock;
 
     /** Address to be advertised as the local address for the RTP
      *  socket, which does not need to be equal as the bound
@@ -167,7 +173,7 @@ typedef struct pjmedia_sock_info
     pj_sockaddr	    rtp_addr_name;
 
     /** The RTCP socket handle. */
-    pj_sock_t	    rtcp_sock;
+	pj_sock_t	    rtcp_sock;
 
     /** Address to be advertised as the local address for the RTCP
      *  socket, which does not need to be equal as the bound
@@ -175,6 +181,15 @@ typedef struct pjmedia_sock_info
      *  with STUN).
      */
     pj_sockaddr	    rtcp_addr_name;
+
+    /** The TCP socket handle. */
+    pj_sock_t	    tcp_rtp_sock;
+
+    /** Address to be advertised as the local address for the TCP
+     *  socket, which does not need to be equal as the bound
+     *  address
+     */
+    pj_sockaddr	    tcp_rtp_addr_name;
 
 } pjmedia_sock_info;
 

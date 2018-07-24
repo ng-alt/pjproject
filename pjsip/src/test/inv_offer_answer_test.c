@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: inv_offer_answer_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -182,7 +182,7 @@ static pjmedia_sdp_session *create_sdp(pj_pool_t *pool, const char *body)
     pj_status_t status;
     
     pj_strdup2_with_null(pool, &dup, body);
-    status = pjmedia_sdp_parse(pool, dup.ptr, dup.slen, &sdp);
+    status = pjmedia_sdp_parse(0, pool, &dup.ptr, &dup.slen, &sdp);
     pj_assert(status == PJ_SUCCESS);
 
     return sdp;
@@ -308,8 +308,8 @@ static pj_bool_t on_rx_request(pjsip_rx_data *rdata)
 	 * Create UAS
 	 */
 	uri = pj_str(CONTACT);
-	status = pjsip_dlg_create_uas(pjsip_ua_instance(), rdata,
-				      &uri, &dlg);
+	status = pjsip_dlg_create_uas(0, pjsip_ua_instance(0), rdata,
+				      &uri, NULL, &dlg);
 	pj_assert(status == PJ_SUCCESS);
 
 	if (inv_test.param.oa[0] == OFFERER_UAC)
@@ -331,7 +331,7 @@ static pj_bool_t on_rx_request(pjsip_rx_data *rdata)
 					  NULL, &tdata);
 	pj_assert(status == PJ_SUCCESS);
 
-	status = pjsip_inv_send_msg(inv_test.uas, tdata);
+	status = pjsip_inv_send_msg(0, inv_test.uas, tdata);
 	pj_assert(status == PJ_SUCCESS);
 
 	return PJ_TRUE;
@@ -376,18 +376,18 @@ static void run_job(job_t *j)
 	sdp = create_sdp(inv->dlg->pool, oa_sdp[inv_test.oa_index].offer);
 
 	TRACE_((THIS_FILE, "    Sending UPDATE with offer"));
-	status = pjsip_inv_update(inv, NULL, sdp, &tdata);
+	status = pjsip_inv_update(0, inv, NULL, sdp, &tdata);
 	pj_assert(status == PJ_SUCCESS);
 
-	status = pjsip_inv_send_msg(inv, tdata);
+	status = pjsip_inv_send_msg(0, inv, tdata);
 	pj_assert(status == PJ_SUCCESS);
 	break;
     case ESTABLISH_CALL:
 	TRACE_((THIS_FILE, "    Sending 200/OK"));
-	status = pjsip_inv_answer(inv, 200, NULL, NULL, &tdata);
+	status = pjsip_inv_answer(0, inv, 200, NULL, NULL, &tdata);
 	pj_assert(status == PJ_SUCCESS);
 
-	status = pjsip_inv_send_msg(inv, tdata);
+	status = pjsip_inv_send_msg(0, inv, tdata);
 	pj_assert(status == PJ_SUCCESS);
 	break;
     }
@@ -413,7 +413,7 @@ static int perform_test(inv_test_param_t *param)
     /*  
      * Create UAC
      */
-    status = pjsip_dlg_create_uac(pjsip_ua_instance(), 
+    status = pjsip_dlg_create_uac(0, pjsip_ua_instance(0), 
 				  &uri, &uri, &uri, &uri, &dlg);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, -10);
 
@@ -433,7 +433,7 @@ static int perform_test(inv_test_param_t *param)
     status = pjsip_inv_invite(inv_test.uac, &tdata);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, -30);
 
-    status = pjsip_inv_send_msg(inv_test.uac, tdata);
+    status = pjsip_inv_send_msg(0, inv_test.uac, tdata);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, -30);
 
     /*
@@ -461,10 +461,10 @@ static int perform_test(inv_test_param_t *param)
      * Hangup
      */
     TRACE_((THIS_FILE, "    Disconnecting call"));
-    status = pjsip_inv_end_session(inv_test.uas, PJSIP_SC_DECLINE, 0, &tdata);
+    status = pjsip_inv_end_session(0, inv_test.uas, PJSIP_SC_DECLINE, 0, &tdata);
     pj_assert(status == PJ_SUCCESS);
 
-    status = pjsip_inv_send_msg(inv_test.uas, tdata);
+    status = pjsip_inv_send_msg(0, inv_test.uas, tdata);
     pj_assert(status == PJ_SUCCESS);
 
     flush_events(500);
@@ -640,7 +640,7 @@ int inv_offer_answer_test(void)
     int rc = 0;
 
     /* Init UA layer */
-    if (pjsip_ua_instance()->id == -1) {
+    if (pjsip_ua_instance(0)->id == -1) {
 	pjsip_ua_init_param ua_param;
 	pj_bzero(&ua_param, sizeof(ua_param));
 	ua_param.on_dlg_forked = &on_dlg_forked;
@@ -648,7 +648,7 @@ int inv_offer_answer_test(void)
     }
 
     /* Init inv-usage */
-    if (pjsip_inv_usage_instance()->id == -1) {
+    if (pjsip_inv_usage_instance(0)->id == -1) {
 	pjsip_inv_callback inv_cb;
 	pj_bzero(&inv_cb, sizeof(inv_cb));
 	inv_cb.on_media_update = &on_media_update;

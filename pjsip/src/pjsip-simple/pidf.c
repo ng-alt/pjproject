@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pidf.c 3747 2011-09-09 09:49:41Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -343,9 +343,9 @@ PJ_DEF(pjpidf_pres*) pjpidf_create(pj_pool_t *pool, const pj_str_t *entity)
     return pres;
 }
 
-PJ_DEF(pjpidf_pres*) pjpidf_parse(pj_pool_t *pool, char *text, int len)
+PJ_DEF(pjpidf_pres*) pjpidf_parse(int inst_id, pj_pool_t *pool, char *text, int len)
 {
-    pjpidf_pres *pres = pj_xml_parse(pool, text, len);
+    pjpidf_pres *pres = pj_xml_parse(inst_id, pool, text, len);
     if (pres && pres->name.slen >= 8) {
 	pj_str_t name;
 

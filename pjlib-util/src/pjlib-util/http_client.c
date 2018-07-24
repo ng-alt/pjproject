@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: http_client.c 3811 2011-10-11 04:40:50Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -109,6 +109,7 @@ enum auth_state
 
 struct pj_http_req
 {
+	int inst_id;
     pj_str_t                url;        /* Request URL */
     pj_http_url             hurl;       /* Parsed request URL */
     pj_sockaddr             addr;       /* The host's socket address */
@@ -148,17 +149,19 @@ static pj_status_t http_req_start_reading(pj_http_req *hreq);
 /* End the request */
 static pj_status_t http_req_end_request(pj_http_req *hreq);
 /* Parse the header data and populate the header fields with the result. */
-static pj_status_t http_headers_parse(char *hdata, pj_size_t size, 
+static pj_status_t http_headers_parse(int inst_id,
+									  char *hdata, pj_size_t size, 
                                       pj_http_headers *headers);
 /* Parse the response */
-static pj_status_t http_response_parse(pj_pool_t *pool,
+static pj_status_t http_response_parse(int inst_id,
+									   pj_pool_t *pool,
                                        pj_http_resp *response,
                                        void *data, pj_size_t size,
                                        pj_size_t *remainder);
 /* Restart the request with authentication */
 static void restart_req_with_auth(pj_http_req *hreq);
 /* Parse authentication challenge */
-static pj_status_t parse_auth_chal(pj_pool_t *pool, pj_str_t *input,
+static pj_status_t parse_auth_chal(int inst_id, pj_pool_t *pool, pj_str_t *input,
 				   pj_http_auth_chal *chal);
 
 static pj_uint16_t get_http_default_port(const pj_str_t *protocol)
@@ -192,8 +195,7 @@ static const char * get_protocol(const pj_str_t *protocol)
 /* Syntax error handler for parser. */
 static void on_syntax_error(pj_scanner *scanner)
 {
-    PJ_UNUSED_ARG(scanner);
-    PJ_THROW(PJ_EINVAL);  // syntax error
+    PJ_THROW(scanner->inst_id, PJ_EINVAL);  // syntax error
 }
 
 /* Callback when connection is established to the server */
@@ -313,7 +315,7 @@ static pj_bool_t http_on_data_read(pj_activesock_t *asock,
         }
 
         /* Parse the response. */
-        st = http_response_parse(hreq->pool, &hreq->response,
+        st = http_response_parse(hreq->inst_id, hreq->pool, &hreq->response,
                                  data, size, &rem);
         if (st == PJLIB_UTIL_EHTTPINCHDR) {
             /* If we already use up all our buffer and still
@@ -354,7 +356,7 @@ static pj_bool_t http_on_data_read(pj_activesock_t *asock,
         	    if (!pj_stricmp(&hdrs->header[i].name, &STR_WWW_AUTH) ||
         		!pj_stricmp(&hdrs->header[i].name, &STR_PROXY_AUTH))
         	    {
-        		status = parse_auth_chal(hreq->pool,
+        		status = parse_auth_chal(hreq->inst_id, hreq->pool,
         					 &hdrs->header[i].value,
         					 &response->auth_chal);
         		break;
@@ -503,7 +505,8 @@ static void on_timeout( pj_timer_heap_t *timer_heap,
 }
 
 /* Parse authentication challenge */
-static pj_status_t parse_auth_chal(pj_pool_t *pool, pj_str_t *input,
+static pj_status_t parse_auth_chal(int inst_id,
+				   pj_pool_t *pool, pj_str_t *input,
 				   pj_http_auth_chal *chal)
 {
     pj_scanner scanner;
@@ -516,9 +519,9 @@ static pj_status_t parse_auth_chal(pj_pool_t *pool, pj_str_t *input,
     pj_status_t status = PJ_SUCCESS;
     PJ_USE_EXCEPTION ;
 
-    pj_scan_init(&scanner, input->ptr, input->slen, PJ_SCAN_AUTOSKIP_WS,
+    pj_scan_init(inst_id, &scanner, input->ptr, input->slen, PJ_SCAN_AUTOSKIP_WS,
 		 &on_syntax_error);
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	/* Get auth scheme */
 	if (*scanner.curptr == '"') {
 	    pj_scan_get_quote(&scanner, '"', '"', &chal->scheme);
@@ -589,7 +592,7 @@ static pj_status_t parse_auth_chal(pj_pool_t *pool, pj_str_t *input,
 	pj_bzero(chal, sizeof(*chal));
 	TRACE_((THIS_FILE, "Error: parsing of auth header failed"));
     }
-    PJ_END;
+    PJ_END(inst_id);
     pj_scan_fini(&scanner);
     return status;
 }
@@ -618,7 +621,8 @@ PJ_DEF(pj_status_t) pj_http_headers_add_elmt(pj_http_headers *headers,
     return PJ_SUCCESS;
 }
 
-static pj_status_t http_response_parse(pj_pool_t *pool,
+static pj_status_t http_response_parse(int inst_id, 
+									   pj_pool_t *pool,
                                        pj_http_resp *response,
                                        void *data, pj_size_t size,
                                        pj_size_t *remainder)
@@ -662,8 +666,8 @@ static pj_status_t http_response_parse(pj_pool_t *pool,
     pj_memcpy(newdata, data, i);
 
     /* Parse the status-line. */
-    pj_scan_init(&scanner, newdata, i, 0, &on_syntax_error);
-    PJ_TRY {
+    pj_scan_init(inst_id, &scanner, newdata, i, 0, &on_syntax_error);
+    PJ_TRY(inst_id) {
         pj_scan_get_until_ch(&scanner, ' ', &response->version);
         pj_scan_advance_n(&scanner, 1, PJ_FALSE);
         pj_scan_get_until_ch(&scanner, ' ', &s);
@@ -677,7 +681,7 @@ static pj_status_t http_response_parse(pj_pool_t *pool,
         pj_scan_fini(&scanner);
         return PJ_GET_EXCEPTION();
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     end_status = scanner.curptr;
     pj_scan_fini(&scanner);
@@ -685,7 +689,7 @@ static pj_status_t http_response_parse(pj_pool_t *pool,
     /* Parse the response headers. */
     size = i - 2 - (end_status - newdata);
     if (size > 0) {
-        status = http_headers_parse(end_status + 1, size,
+        status = http_headers_parse(inst_id, end_status + 1, size,
                                     &response->headers);
     } else {
         status = PJ_SUCCESS;
@@ -713,7 +717,8 @@ static pj_status_t http_response_parse(pj_pool_t *pool,
     return status;
 }
 
-static pj_status_t http_headers_parse(char *hdata, pj_size_t size, 
+static pj_status_t http_headers_parse(int inst_id,
+									  char *hdata, pj_size_t size, 
                                       pj_http_headers *headers)
 {
     pj_scanner scanner;
@@ -723,12 +728,12 @@ static pj_status_t http_headers_parse(char *hdata, pj_size_t size,
 
     PJ_ASSERT_RETURN(headers, PJ_EINVAL);
 
-    pj_scan_init(&scanner, hdata, size, 0, &on_syntax_error);
+    pj_scan_init(inst_id, &scanner, hdata, size, 0, &on_syntax_error);
 
     /* Parse each line of header field consisting of header field name and
      * value, separated by ":" and any number of white spaces.
      */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
         do {
             pj_scan_get_until_chr(&scanner, ":\n", &s);
             if (*scanner.curptr == ':') {
@@ -738,7 +743,7 @@ static pj_status_t http_headers_parse(char *hdata, pj_size_t size,
                     s2.slen--;
                 status = pj_http_headers_add_elmt(headers, &s, &s2);
                 if (status != PJ_SUCCESS)
-                    PJ_THROW(status);
+                    PJ_THROW(scanner.inst_id, status);
             }
             pj_scan_advance_n(&scanner, 1, PJ_TRUE);
             /* Finish parsing */
@@ -750,7 +755,7 @@ static pj_status_t http_headers_parse(char *hdata, pj_size_t size,
         pj_scan_fini(&scanner);
         return PJ_GET_EXCEPTION();
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     pj_scan_fini(&scanner);
 
@@ -797,7 +802,7 @@ static char *get_url_at_pos(const char *str, long len)
 }
 
 
-PJ_DEF(pj_status_t) pj_http_req_parse_url(const pj_str_t *url, 
+PJ_DEF(pj_status_t) pj_http_req_parse_url(int inst_id, const pj_str_t *url, 
                                           pj_http_url *hurl)
 {
     pj_scanner scanner;
@@ -807,9 +812,9 @@ PJ_DEF(pj_status_t) pj_http_req_parse_url(const pj_str_t *url,
     if (!len) return -1;
     
     pj_bzero(hurl, sizeof(*hurl));
-    pj_scan_init(&scanner, url->ptr, url->slen, 0, &on_syntax_error);
+    pj_scan_init(inst_id, &scanner, url->ptr, url->slen, 0, &on_syntax_error);
 
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	pj_str_t s;
 
         /* Exhaust any whitespaces. */
@@ -824,11 +829,11 @@ PJ_DEF(pj_status_t) pj_http_req_parse_url(const pj_str_t *url,
             pj_strset2(&hurl->protocol,
 		       (char*)http_protocol_names[PROTOCOL_HTTPS]);
         } else {
-            PJ_THROW(PJ_ENOTSUP); // unsupported protocol
+            PJ_THROW(scanner.inst_id, PJ_ENOTSUP); // unsupported protocol
         }
 
         if (pj_scan_strcmp(&scanner, "://", 3)) {
-            PJ_THROW(PJLIB_UTIL_EHTTPINURL); // no "://" after protocol name
+            PJ_THROW(scanner.inst_id, PJLIB_UTIL_EHTTPINURL); // no "://" after protocol name
         }
         pj_scan_advance_n(&scanner, 3, PJ_FALSE);
 
@@ -848,7 +853,7 @@ PJ_DEF(pj_status_t) pj_http_req_parse_url(const pj_str_t *url,
         pj_scan_get_until_chr(&scanner, ":/", &s);
         pj_strassign(&hurl->host, &s);
         if (hurl->host.slen==0)
-            PJ_THROW(PJ_EINVAL);
+            PJ_THROW(scanner.inst_id, PJ_EINVAL);
         if (pj_scan_is_eof(&scanner) || *scanner.curptr == '/') {
             /* No port number specified */
             /* Assume default http/https port number */
@@ -860,7 +865,7 @@ PJ_DEF(pj_status_t) pj_http_req_parse_url(const pj_str_t *url,
             /* Parse the port number */
             hurl->port = (pj_uint16_t)pj_strtoul(&s);
             if (!hurl->port)
-                PJ_THROW(PJLIB_UTIL_EHTTPINPORT); // invalid port number
+                PJ_THROW(scanner.inst_id, PJLIB_UTIL_EHTTPINPORT); // invalid port number
         }
 
         if (!pj_scan_is_eof(&scanner)) {
@@ -875,7 +880,7 @@ PJ_DEF(pj_status_t) pj_http_req_parse_url(const pj_str_t *url,
         pj_scan_fini(&scanner);
 	return PJ_GET_EXCEPTION();
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     pj_scan_fini(&scanner);
     return PJ_SUCCESS;
@@ -887,7 +892,8 @@ PJ_DEF(void) pj_http_req_set_timeout(pj_http_req *http_req,
     pj_memcpy(&http_req->param.timeout, timeout, sizeof(*timeout));
 }
 
-PJ_DEF(pj_status_t) pj_http_req_create(pj_pool_t *pool,
+PJ_DEF(pj_status_t) pj_http_req_create(int inst_id, 
+									   pj_pool_t *pool,
                                        const pj_str_t *url,
                                        pj_timer_heap_t *timer,
                                        pj_ioqueue_t *ioqueue,
@@ -919,6 +925,7 @@ PJ_DEF(pj_status_t) pj_http_req_create(pj_pool_t *pool,
     hreq->state = IDLE;
     hreq->resolved = PJ_FALSE;
     hreq->buffer.ptr = NULL;
+	hreq->inst_id = inst_id;
     pj_timer_entry_init(&hreq->timer_entry, 0, hreq, &on_timeout);
 
     /* Initialize parameter */
@@ -946,7 +953,7 @@ PJ_DEF(pj_status_t) pj_http_req_create(pj_pool_t *pool,
 	pj_pool_release(hreq->pool);
         return PJ_ENOMEM;
     }
-    status = pj_http_req_parse_url(&hreq->url, &hreq->hurl);
+    status = pj_http_req_parse_url(inst_id, &hreq->url, &hreq->hurl);
     if (status != PJ_SUCCESS) {
 	pj_pool_release(hreq->pool);
         return status; // Invalid URL supplied
@@ -1098,7 +1105,7 @@ static pj_status_t start_http_req(pj_http_req *http_req,
     }
 
     /* Connect to host */
-    http_req->state = CONNECTING;
+	http_req->state = CONNECTING;
     status = pj_activesock_start_connect(http_req->asock, http_req->pool, 
                                          (pj_sock_t *)&(http_req->addr), 
                                          pj_sockaddr_get_len(&http_req->addr));

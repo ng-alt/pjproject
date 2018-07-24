@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: g7221.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -33,8 +33,8 @@
  * @brief Implementation of G.722.1 codec
  * @{
  *
- * <b>G.722.1 licensed from Polycom®</b><br />
- * <b>G.722.1 Annex C licensed from Polycom®</b>
+ * <b>G.722.1 licensed from Polycom?/b><br />
+ * <b>G.722.1 Annex C licensed from Polycom?/b>
  *
  * This section describes functions to initialize and register G.722.1 codec
  * factory to the codec manager. After the codec factory has been registered,

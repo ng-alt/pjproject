@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_endpoint.c 3988 2012-03-28 07:32:42Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -35,10 +35,26 @@
 #include <pj/errno.h>
 #include <pj/lock.h>
 
+/**
+ * Maximum simultaneous calls. copy from pjsua.h
+ */
+#ifndef PJSUA_MAX_CALLS
+#   define PJSUA_MAX_CALLS          15
+#endif
+
 #define PJSIP_EX_NO_MEMORY  pj_NO_MEMORY_EXCEPTION()
 #define THIS_FILE	    "sip_endpoint.c"
 
 #define MAX_METHODS   32
+
+
+/* List of SIP endpoint exit callback. */
+typedef struct exit_cb
+{
+    PJ_DECL_LIST_MEMBER		    (struct exit_cb);
+    pjsip_endpt_exit_callback	    func;
+} exit_cb;
+
 
 /**
  * The SIP endpoint.
@@ -86,6 +102,30 @@ struct pjsip_endpoint
 
     /** Additional request headers. */
     pjsip_hdr		 req_hdr;
+
+    /** List of exit callback. */
+    exit_cb		 exit_cb_list;
+
+    /** should be tunnel list per endpoint */
+    //void               *tunnel;
+	void   *tunnel[PJSUA_MAX_CALLS];
+    pjsip_endpt_tunnel_callback *tnl_cb;
+    //pjsip_tunnel        tunnels[PJSIP_MAX_TUNNELS];
+
+	char local_userid[PJSUA_MAX_CALLS][64];
+	char remote_userid[PJSUA_MAX_CALLS][64];
+
+	char local_deviceid[128];
+	char remote_deviceid[PJSUA_MAX_CALLS][128];
+
+	char local_turnpwd[128];
+	char remote_turnpwd[PJSUA_MAX_CALLS][128];
+
+	char local_turnsvr[128];
+	char remote_turnsvr[PJSUA_MAX_CALLS][128];
+
+	int  inst_id;  // To store instance id of pjsua
+
 };
 
 
@@ -110,11 +150,11 @@ static pj_status_t unload_module(pjsip_endpoint *endpt,
 				 pjsip_module *mod);
 
 /* Defined in sip_parser.c */
-void init_sip_parser(void);
-void deinit_sip_parser(void);
+void init_sip_parser(int inst_id);
+void deinit_sip_parser(int inst_id);
 
 /* Defined in sip_tel_uri.c */
-pj_status_t pjsip_tel_uri_subsys_init(void);
+pj_status_t pjsip_tel_uri_subsys_init(int inst_ids);
 
 
 /*
@@ -125,10 +165,9 @@ pj_status_t pjsip_tel_uri_subsys_init(void);
  */
 static void pool_callback( pj_pool_t *pool, pj_size_t size )
 {
-    PJ_UNUSED_ARG(pool);
     PJ_UNUSED_ARG(size);
 
-    PJ_THROW(PJSIP_EX_NO_MEMORY);
+    PJ_THROW(pool->factory->inst_id, PJSIP_EX_NO_MEMORY);
 }
 
 
@@ -185,7 +224,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_register_module( pjsip_endpoint *endpt,
 
     /* Try to start the module. */
     if (mod->start) {
-	status = (*mod->start)();
+	status = (*mod->start)(endpt);
 	if (status != PJ_SUCCESS)
 	    goto on_return;
     }
@@ -224,9 +263,17 @@ PJ_DEF(pj_status_t) pjsip_endpt_unregister_module( pjsip_endpoint *endpt,
 
     pj_rwmutex_lock_write(endpt->mod_mutex);
 
+	if (pj_list_find_node(&endpt->module_list, mod) != mod)
+		PJ_LOG(4, ("sip_endpoint.c", "pjsip_endpt_unregister_module() module not found(1)."));
+
     /* Make sure the module exists in the list. */
     PJ_ASSERT_ON_FAIL(	pj_list_find_node(&endpt->module_list, mod) == mod,
 			{status = PJ_ENOTFOUND;goto on_return;} );
+
+	if (mod->id<0 || 
+		mod->id>=(int)PJ_ARRAY_SIZE(endpt->modules) ||
+		endpt->modules[mod->id] != mod)
+		PJ_LOG(4, ("sip_endpoint.c", "pjsip_endpt_unregister_module() module not found(2)."));
 
     /* Make sure the module exists in the array. */
     PJ_ASSERT_ON_FAIL(	mod->id>=0 && 
@@ -236,7 +283,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_unregister_module( pjsip_endpoint *endpt,
 
     /* Try to stop the module. */
     if (mod->stop) {
-	status = (*mod->stop)();
+	status = (*mod->stop)(endpt);
 	if (status != PJ_SUCCESS) goto on_return;
     }
 
@@ -264,7 +311,7 @@ static pj_status_t unload_module(pjsip_endpoint *endpt,
 
     /* Try to unload the module. */
     if (mod->unload) {
-	status = (*mod->unload)();
+	status = (*mod->unload)(endpt);
 	if (status != PJ_SUCCESS) 
 	    return status;
     }
@@ -361,7 +408,8 @@ PJ_DEF(pj_status_t) pjsip_endpt_add_capability( pjsip_endpoint *endpt,
     PJ_ASSERT_RETURN(endpt!=NULL && count>0 && tags, PJ_EINVAL);
     PJ_ASSERT_RETURN(htype==PJSIP_H_ACCEPT || 
 		     htype==PJSIP_H_ALLOW ||
-		     htype==PJSIP_H_SUPPORTED,
+			 htype==PJSIP_H_SUPPORTED ||
+			 htype==PJSIP_H_TNL_SUPPORTED,
 		     PJ_EINVAL);
 
     /* Find the header. */
@@ -376,10 +424,13 @@ PJ_DEF(pj_status_t) pjsip_endpt_add_capability( pjsip_endpoint *endpt,
 	    break;
 	case PJSIP_H_ALLOW:
 	    hdr = pjsip_allow_hdr_create(endpt->pool);
-	    break;
+		break;
 	case PJSIP_H_SUPPORTED:
-	    hdr = pjsip_supported_hdr_create(endpt->pool);
-	    break;
+		hdr = pjsip_supported_hdr_create(endpt->pool);
+		break;
+	case PJSIP_H_TNL_SUPPORTED:
+		hdr = pjsip_tnl_supported_hdr_create(endpt->pool);
+		break;
 	default:
 	    return PJ_EINVAL;
 	}
@@ -407,12 +458,28 @@ PJ_DEF(const pjsip_hdr*) pjsip_endpt_get_request_headers(pjsip_endpoint *endpt)
     return &endpt->req_hdr;
 }
 
+/*
+ * Set user_data of endpoint.
+ */
+PJ_DEF(void) pjsip_endpt_set_inst_id(pjsip_endpoint *endpt, int inst_id)
+{
+    endpt->inst_id = inst_id;
+}
+
+/*
+ * Get user_data of endpoint.
+ */
+PJ_DEF(int) pjsip_endpt_get_inst_id(pjsip_endpoint *endpt)
+{
+    return endpt->inst_id;
+}
+
 
 /*
  * Initialize endpoint.
  */
 PJ_DEF(pj_status_t) pjsip_endpt_create(pj_pool_factory *pf,
-				       const char *name,
+									   const char *name,
                                        pjsip_endpoint **p_endpt)
 {
     pj_status_t status;
@@ -441,9 +508,13 @@ PJ_DEF(pj_status_t) pjsip_endpt_create(pj_pool_factory *pf,
     endpt = PJ_POOL_ZALLOC_T(pool, pjsip_endpoint);
     endpt->pool = pool;
     endpt->pf = pf;
+	endpt->inst_id = pf->inst_id;
 
     /* Init modules list. */
     pj_list_init(&endpt->module_list);
+
+    /* Initialize exit callback list. */
+    pj_list_init(&endpt->exit_cb_list);
 
     /* Create R/W mutex for module manipulation. */
     status = pj_rwmutex_create(endpt->pool, "ept%p", &endpt->mod_mutex);
@@ -451,10 +522,10 @@ PJ_DEF(pj_status_t) pjsip_endpt_create(pj_pool_factory *pf,
 	goto on_error;
 
     /* Init parser. */
-    init_sip_parser();
+    init_sip_parser(endpt->inst_id);
 
     /* Init tel: uri */
-    pjsip_tel_uri_subsys_init();
+    pjsip_tel_uri_subsys_init(endpt->inst_id);
 
     /* Get name. */
     if (name != NULL) {
@@ -559,6 +630,9 @@ on_error:
 PJ_DEF(void) pjsip_endpt_destroy(pjsip_endpoint *endpt)
 {
     pjsip_module *mod;
+    exit_cb *ecb;
+
+	int inst_id = endpt->pool->factory->inst_id;
 
     PJ_LOG(5, (THIS_FILE, "Destroying endpoing instance.."));
 
@@ -567,7 +641,7 @@ PJ_DEF(void) pjsip_endpt_destroy(pjsip_endpoint *endpt)
     while (mod != &endpt->module_list) {
 	pjsip_module *prev = mod->prev;
 	if (mod->stop) {
-	    (*mod->stop)();
+	    (*mod->stop)(endpt);
 	}
 	mod = prev;
     }
@@ -592,11 +666,18 @@ PJ_DEF(void) pjsip_endpt_destroy(pjsip_endpoint *endpt)
     /* Destroy timer heap */
     pj_timer_heap_destroy(endpt->timer_heap);
 
+    /* Call all registered exit callbacks */
+    ecb = endpt->exit_cb_list.next;
+    while (ecb != &endpt->exit_cb_list) {
+	(*ecb->func)(endpt);
+	ecb = ecb->next;
+    }
+
     /* Delete endpoint mutex. */
     pj_mutex_destroy(endpt->mutex);
 
     /* Deinit parser */
-    deinit_sip_parser();
+    deinit_sip_parser(inst_id);
 
     /* Delete module's mutex */
     pj_rwmutex_destroy(endpt->mod_mutex);
@@ -667,16 +748,17 @@ PJ_DEF(void) pjsip_endpt_release_pool( pjsip_endpoint *endpt, pj_pool_t *pool )
 }
 
 
-PJ_DEF(pj_status_t) pjsip_endpt_handle_events2(pjsip_endpoint *endpt,
+PJ_DEF(pj_status_t) pjsip_endpt_handle_events3(pjsip_endpoint *endpt,
 					       const pj_time_val *max_timeout,
-					       unsigned *p_count)
+					       unsigned *p_count,
+						   int force_use_max_timeout)
 {
     /* timeout is 'out' var. This just to make compiler happy. */
     pj_time_val timeout = { 0, 0};
     unsigned count = 0, net_event_count = 0;
     int c;
 
-    PJ_LOG(6, (THIS_FILE, "pjsip_endpt_handle_events()"));
+    PJ_LOG(6, (THIS_FILE, "pjsip_endpt_handle_events3()"));
 
     /* Poll the timer. The timer heap has its own mutex for better 
      * granularity, so we don't need to lock end endpoint. 
@@ -698,6 +780,12 @@ PJ_DEF(pj_status_t) pjsip_endpt_handle_events2(pjsip_endpoint *endpt,
     if (max_timeout && PJ_TIME_VAL_GT(timeout, *max_timeout)) {
 	timeout = *max_timeout;
     }
+
+	if (force_use_max_timeout)// DEAN added
+	{
+		timeout = *max_timeout;
+		PJ_LOG(3, ("sip_endpoint.c", "pjsip_endpt_handle_events3() force to use max timeout."));
+	}
 
     /* Poll ioqueue. 
      * Repeat polling the ioqueue while we have immediate events, because
@@ -722,15 +810,27 @@ PJ_DEF(pj_status_t) pjsip_endpt_handle_events2(pjsip_endpoint *endpt,
 	    break;
 	} else {
 	    net_event_count += c;
-	    timeout.sec = timeout.msec = 0;
+		timeout.sec = timeout.msec = 0;
 	}
     } while (c > 0 && net_event_count < PJSIP_MAX_NET_EVENTS);
 
     count += net_event_count;
     if (p_count)
 	*p_count = count;
-
+#if 1
+    if(endpt->tnl_cb) {
+	 endpt->tnl_cb(endpt);
+    }
+#endif
     return PJ_SUCCESS;
+}
+
+
+PJ_DEF(pj_status_t) pjsip_endpt_handle_events2(pjsip_endpoint *endpt,
+					       const pj_time_val *max_timeout,
+					       unsigned *p_count)
+{
+    return pjsip_endpt_handle_events3(endpt, max_timeout, p_count, 0);
 }
 
 /*
@@ -997,7 +1097,9 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_resolver(pjsip_endpoint *endpt,
 						pj_dns_resolver **p_resv)
 {
 #if PJSIP_HAS_RESOLVER
+	int inst_id;
     PJ_ASSERT_RETURN(endpt && p_resv, PJ_EINVAL);
+	inst_id = endpt->inst_id;
     return pj_dns_resolver_create( endpt->pf, NULL, 0, endpt->timer_heap,
 				   endpt->ioqueue, p_resv);
 #else
@@ -1178,3 +1280,178 @@ PJ_DEF(void) pjsip_endpt_dump( pjsip_endpoint *endpt, pj_bool_t detail )
 #endif
 }
 
+
+PJ_DEF(pj_status_t) pjsip_endpt_atexit( pjsip_endpoint *endpt,
+					pjsip_endpt_exit_callback func)
+{
+    exit_cb *new_cb;
+
+    PJ_ASSERT_RETURN(endpt && func, PJ_EINVAL);
+
+    new_cb = PJ_POOL_ZALLOC_T(endpt->pool, exit_cb);
+    new_cb->func = func;
+
+    pj_mutex_lock(endpt->mutex);
+    pj_list_push_back(&endpt->exit_cb_list, new_cb);
+    pj_mutex_unlock(endpt->mutex);
+
+    return PJ_SUCCESS;
+}
+
+PJ_DEF(void *) pjsip_endpt_get_tunnel( pjsip_endpoint *endpt, int call_id)
+{
+    return endpt->tunnel[call_id];
+}
+
+/* Andrew Added */
+PJ_DEF(void) pjsip_endpt_register_tunnel( pjsip_endpoint *endpt, int call_id, void *tunnel/*, pjsip_endpt_tunnel_callback *cb */)
+{
+    endpt->tunnel[call_id] = tunnel;
+    //endpt->tnl_cb = cb;
+    PJ_LOG(4, (__FILE__, "pjsip_endpt_register_tunnel() endpt=[%p], tunnel=[%p]", endpt, endpt->tunnel[call_id]));
+}
+
+/* Andrew Added */
+PJ_DEF(void) pjsip_endpt_unregister_tunnel( pjsip_endpoint *endpt, int call_id, void *tunnel )
+{
+	if(endpt->tunnel[call_id] == tunnel) {
+		endpt->tunnel[call_id] = NULL;
+		endpt->tnl_cb = NULL;
+	}
+}
+
+#if 0
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_userid( pjsip_endpoint *endpt, int call_id, char *user_id)
+{
+	if(user_id) {
+		strncpy(user_id, endpt->local_userid[call_id], sizeof(endpt->local_userid[call_id]));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_userid( pjsip_endpoint *endpt, int call_id, char *user_id, int user_id_len)
+{
+	if(endpt->local_userid[call_id]) {
+		strncpy(endpt->local_userid[call_id], user_id, user_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_userid( pjsip_endpoint *endpt, int call_id, char *user_id, int user_id_len)
+{
+	if(endpt->remote_userid[call_id]) {
+		strncpy(endpt->remote_userid[call_id], user_id, user_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_userid( pjsip_endpoint *endpt, int call_id, char *user_id)
+{
+	if(user_id) {
+		strncpy(user_id, endpt->remote_userid[call_id], sizeof(endpt->remote_userid[call_id]));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_deviceid( pjsip_endpoint *endpt, char *device_id)
+{
+	if(device_id) {
+		strncpy(device_id, endpt->local_deviceid, sizeof(endpt->local_deviceid));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_deviceid( pjsip_endpoint *endpt, char *device_id, int device_id_len)
+{
+	if(endpt->local_deviceid) {
+		strncpy(endpt->local_deviceid, device_id, device_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_deviceid( pjsip_endpoint *endpt, int call_id, char *device_id, int user_id_len)
+{
+	if(endpt->remote_userid[call_id]) {
+		strncpy(endpt->remote_deviceid[call_id], device_id, user_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_deviceid( pjsip_endpoint *endpt, int call_id, char *device_id)
+{
+	if(device_id) {
+		strncpy(device_id, endpt->remote_deviceid[call_id], sizeof(endpt->remote_deviceid[call_id]));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_turnsvr( pjsip_endpoint *endpt, char *turn_server)
+{
+	if(turn_server) {
+		strncpy(turn_server, endpt->local_turnsvr, sizeof(endpt->local_turnsvr));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_turnsvr( pjsip_endpoint *endpt, char *turn_server, int turn_server_len)
+{
+	if(endpt->local_turnsvr) {
+		strncpy(endpt->local_turnsvr, turn_server, turn_server_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_turnsvr( pjsip_endpoint *endpt, int call_id, char *turn_server, int turn_server_len)
+{
+	if(endpt->remote_turnsvr[call_id]) {
+		strncpy(endpt->remote_turnsvr[call_id], turn_server, turn_server_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_turnsvr( pjsip_endpoint *endpt, int call_id, char *turn_server)
+{
+	if(turn_server) {
+		strncpy(turn_server, endpt->remote_turnsvr[call_id], sizeof(endpt->remote_turnsvr[call_id]));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_turnpwd( pjsip_endpoint *endpt, char *turn_pwd)
+{
+	if(turn_pwd) {
+		strncpy(turn_pwd, endpt->local_turnpwd, sizeof(endpt->local_turnpwd));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_turnpwd( pjsip_endpoint *endpt, char *turn_pwd, int turn_pwd_len)
+{
+	if(endpt->local_turnpwd) {
+		strncpy(endpt->local_turnpwd, turn_pwd, turn_pwd_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_turnpwd( pjsip_endpoint *endpt, int call_id, char *turn_pwd, int turn_pwd_len)
+{
+	if(endpt->remote_turnpwd[call_id]) {
+		strncpy(endpt->remote_turnpwd[call_id], turn_pwd, turn_pwd_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_turnpwd( pjsip_endpoint *endpt, int call_id, char *turn_pwd)
+{
+	if(turn_pwd) {
+		strncpy(turn_pwd, endpt->remote_turnpwd[call_id], sizeof(endpt->remote_turnpwd[call_id]));
+	}
+}
+#endif
+
+/* Dean Added */
+PJ_DEF(pj_pool_t *) pjsip_endpt_get_pool( pjsip_endpoint *endpt)
+{
+	return endpt->pool;
+}

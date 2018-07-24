@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: presence.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -334,6 +334,7 @@ PJ_DECL(pj_status_t) pjsip_pres_create_xpidf(pj_pool_t *pool,
 /**
  * This is a utility function to parse PIDF body into PJSIP presence status.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param rdata		The incoming SIP message containing the PIDF body.
  * @param pool		Pool to allocate memory to copy the strings into
  *			the presence status structure.
@@ -343,13 +344,14 @@ PJ_DECL(pj_status_t) pjsip_pres_create_xpidf(pj_pool_t *pool,
  *
  * @see pjsip_pres_parse_pidf2()
  */
-PJ_DECL(pj_status_t) pjsip_pres_parse_pidf(pjsip_rx_data *rdata,
+PJ_DECL(pj_status_t) pjsip_pres_parse_pidf(int inst_id, pjsip_rx_data *rdata,
 					   pj_pool_t *pool,
 					   pjsip_pres_status *status);
 
 /**
  * This is a utility function to parse PIDF body into PJSIP presence status.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param body		Text body, with one extra space at the end to place
  * 			NULL character temporarily during parsing.
  * @param body_len	Length of the body, not including the NULL termination
@@ -362,7 +364,8 @@ PJ_DECL(pj_status_t) pjsip_pres_parse_pidf(pjsip_rx_data *rdata,
  *
  * @see pjsip_pres_parse_pidf()
  */
-PJ_DECL(pj_status_t) pjsip_pres_parse_pidf2(char *body, unsigned body_len,
+PJ_DECL(pj_status_t) pjsip_pres_parse_pidf2(int inst_id, 
+						char *body, unsigned body_len,
 					    pj_pool_t *pool,
 					    pjsip_pres_status *status);
 
@@ -370,6 +373,7 @@ PJ_DECL(pj_status_t) pjsip_pres_parse_pidf2(char *body, unsigned body_len,
 /**
  * This is a utility function to parse X-PIDF body into PJSIP presence status.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param rdata		The incoming SIP message containing the X-PIDF body.
  * @param pool		Pool to allocate memory to copy the strings into
  *			the presence status structure.
@@ -379,7 +383,8 @@ PJ_DECL(pj_status_t) pjsip_pres_parse_pidf2(char *body, unsigned body_len,
  *
  * @see pjsip_pres_parse_xpidf2()
  */
-PJ_DECL(pj_status_t) pjsip_pres_parse_xpidf(pjsip_rx_data *rdata,
+PJ_DECL(pj_status_t) pjsip_pres_parse_xpidf(int inst_id, 
+					   pjsip_rx_data *rdata,
 					   pj_pool_t *pool,
 					   pjsip_pres_status *status);
 
@@ -387,6 +392,7 @@ PJ_DECL(pj_status_t) pjsip_pres_parse_xpidf(pjsip_rx_data *rdata,
 /**
  * This is a utility function to parse X-PIDF body into PJSIP presence status.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param body		Text body, with one extra space at the end to place
  * 			NULL character temporarily during parsing.
  * @param body_len	Length of the body, not including the NULL termination
@@ -399,7 +405,8 @@ PJ_DECL(pj_status_t) pjsip_pres_parse_xpidf(pjsip_rx_data *rdata,
  *
  * @see pjsip_pres_parse_xpidf()
  */
-PJ_DECL(pj_status_t) pjsip_pres_parse_xpidf2(char *body, unsigned body_len,
+PJ_DECL(pj_status_t) pjsip_pres_parse_xpidf2(int inst_id, 
+						 char *body, unsigned body_len,
 					     pj_pool_t *pool,
 					     pjsip_pres_status *status);
 

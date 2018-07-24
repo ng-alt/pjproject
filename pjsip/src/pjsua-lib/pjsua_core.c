@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pjsua_core.c 4404 2013-02-27 14:47:37Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -27,14 +27,57 @@
 /* Internal prototypes */
 static void resolve_stun_entry(pjsua_stun_resolve *sess);
 
-
 /* PJSUA application instance. */
-struct pjsua_data pjsua_var;
+struct pjsua_data pjsua_var[PJSUA_MAX_INSTANCES];
 
+static pjsua_inst_id next_inst_id = 1;
+static int max_instances = 2;
 
-PJ_DEF(struct pjsua_data*) pjsua_get_var(void)
+/* Allocate one call id */
+PJ_DEF(pjsua_inst_id) alloc_inst_id(void)
 {
-    return &pjsua_var;
+	pjsua_inst_id iid;
+
+	/* New algorithm: round-robin */
+	if (next_inst_id >= (int)(max_instances-1) || 
+		next_inst_id < 1)
+	{
+		next_inst_id = 1;
+	}
+
+	for (iid=next_inst_id; 
+		iid<=(int)(max_instances-1); 
+		++iid) 
+	{
+		if (pjsua_var[iid].pool == NULL) {
+			++next_inst_id;
+			return iid;
+		}
+	}
+
+	for (iid=1; iid < next_inst_id; ++iid) {
+		if (pjsua_var[iid].pool == NULL) {
+			++next_inst_id;
+			return iid;
+		}
+	}
+
+	return PJSUA_INVALID_ID;
+}
+
+
+PJ_DEF(void) set_max_instances(unsigned max_value)
+{
+	max_instances = max_value;
+}
+PJ_DEF(int) get_max_instances()
+{
+	return max_instances;
+}
+
+PJ_DEF(struct pjsua_data*) pjsua_get_var(pjsua_inst_id inst_id)
+{
+    return &pjsua_var[inst_id];
 }
 
 
@@ -49,24 +92,26 @@ PJ_DEF(void) pjsua_perror( const char *sender, const char *title,
 }
 
 
-static void init_data()
+static void init_data(pjsua_inst_id inst_id)
 {
     unsigned i;
 
-    pj_bzero(&pjsua_var, sizeof(pjsua_var));
+    pj_bzero(&pjsua_var[inst_id], sizeof(pjsua_var[inst_id]));
 
-    for (i=0; i<PJ_ARRAY_SIZE(pjsua_var.acc); ++i)
-	pjsua_var.acc[i].index = i;
+	pjsua_var[inst_id].id = inst_id;
+
+    for (i=0; i<PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i)
+	pjsua_var[inst_id].acc[i].index = i;
     
-    for (i=0; i<PJ_ARRAY_SIZE(pjsua_var.tpdata); ++i)
-	pjsua_var.tpdata[i].index = i;
+    for (i=0; i<PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata); ++i)
+	pjsua_var[inst_id].tpdata[i].index = i;
 
-    pjsua_var.stun_status = PJ_EUNKNOWN;
-    pjsua_var.nat_status = PJ_EPENDING;
-    pj_list_init(&pjsua_var.stun_res);
-    pj_list_init(&pjsua_var.outbound_proxy);
+    pjsua_var[inst_id].stun_status = PJ_EUNKNOWN;
+    pjsua_var[inst_id].nat_status = PJ_EPENDING;
+    pj_list_init(&pjsua_var[inst_id].stun_res);
+    pj_list_init(&pjsua_var[inst_id].outbound_proxy);
 
-    pjsua_config_default(&pjsua_var.ua_cfg);
+    pjsua_config_default(&pjsua_var[inst_id].ua_cfg);
 }
 
 
@@ -89,15 +134,16 @@ PJ_DEF(void) pjsua_logging_config_dup(pj_pool_t *pool,
 				      pjsua_logging_config *dst,
 				      const pjsua_logging_config *src)
 {
-    pj_memcpy(dst, src, sizeof(*src));
-    pj_strdup_with_null(pool, &dst->log_filename, &src->log_filename);
+	pj_memcpy(dst, src, sizeof(*src));
+	pj_strdup_with_null(pool, &dst->log_filename, &src->log_filename);
+	pj_strdup_with_null(pool, &dst->log_flag_file, &src->log_flag_file);
 }
 
 PJ_DEF(void) pjsua_config_default(pjsua_config *cfg)
 {
     pj_bzero(cfg, sizeof(*cfg));
 
-    cfg->max_calls = ((PJSUA_MAX_CALLS) < 4) ? (PJSUA_MAX_CALLS) : 4;
+    cfg->max_calls = ((PJSUA_MAX_CALLS) <= 15) ? (PJSUA_MAX_CALLS) : 15;
     cfg->thread_cnt = 1;
     cfg->nat_type_in_sdp = 1;
     cfg->stun_ignore_failure = PJ_TRUE;
@@ -161,7 +207,7 @@ PJ_DEF(void) pjsua_transport_config_dup(pj_pool_t *pool,
     pj_memcpy(dst, src, sizeof(*src));
 }
 
-PJ_DEF(void) pjsua_acc_config_default(pjsua_acc_config *cfg)
+PJ_DEF(void) pjsua_acc_config_default(pjsua_inst_id inst_id, pjsua_acc_config *cfg)
 {
     pj_bzero(cfg, sizeof(*cfg));
 
@@ -172,15 +218,15 @@ PJ_DEF(void) pjsua_acc_config_default(pjsua_acc_config *cfg)
     cfg->unpublish_max_wait_time_msec = PJSUA_UNPUBLISH_MAX_WAIT_TIME_MSEC;
     cfg->transport_id = PJSUA_INVALID_ID;
     cfg->allow_contact_rewrite = PJ_TRUE;
-    cfg->require_100rel = pjsua_var.ua_cfg.require_100rel;
-    cfg->use_timer = pjsua_var.ua_cfg.use_timer;
-    cfg->timer_setting = pjsua_var.ua_cfg.timer_setting;
+    cfg->require_100rel = pjsua_var[inst_id].ua_cfg.require_100rel;
+    cfg->use_timer = pjsua_var[inst_id].ua_cfg.use_timer;
+    cfg->timer_setting = pjsua_var[inst_id].ua_cfg.timer_setting;
     cfg->ka_interval = 15;
     cfg->ka_data = pj_str("\r\n");
 #if defined(PJMEDIA_HAS_SRTP) && (PJMEDIA_HAS_SRTP != 0)
-    cfg->use_srtp = pjsua_var.ua_cfg.use_srtp;
-    cfg->srtp_secure_signaling = pjsua_var.ua_cfg.srtp_secure_signaling;
-    cfg->srtp_optional_dup_offer = pjsua_var.ua_cfg.srtp_optional_dup_offer;
+    cfg->use_srtp = pjsua_var[inst_id].ua_cfg.use_srtp;
+    cfg->srtp_secure_signaling = pjsua_var[inst_id].ua_cfg.srtp_secure_signaling;
+    cfg->srtp_optional_dup_offer = pjsua_var[inst_id].ua_cfg.srtp_optional_dup_offer;
 #endif
     cfg->reg_retry_interval = PJSUA_REG_RETRY_INTERVAL;
     cfg->contact_rewrite_method = PJSUA_CONTACT_REWRITE_METHOD;
@@ -244,7 +290,7 @@ PJ_DEF(void) pjsua_media_config_default(pjsua_media_config *cfg)
 /* Notification on incoming messages */
 static pj_bool_t logging_on_rx_msg(pjsip_rx_data *rdata)
 {
-    PJ_LOG(4,(THIS_FILE, "RX %d bytes %s from %s %s:%d:\n"
+    PJ_LOG(1,(THIS_FILE, "RX %d bytes %s from %s %s:%d:\n"
 			 "%.*s\n"
 			 "--end msg--",
 			 rdata->msg_info.len,
@@ -269,7 +315,7 @@ static pj_status_t logging_on_tx_msg(pjsip_tx_data *tdata)
      *	has lower priority than transport layer.
      */
 
-    PJ_LOG(4,(THIS_FILE, "TX %d bytes %s to %s %s:%d:\n"
+    PJ_LOG(1,(THIS_FILE, "TX %d bytes %s to %s %s:%d:\n"
 			 "%.*s\n"
 			 "--end msg--",
 			 (tdata->buf.cur - tdata->buf.start),
@@ -285,7 +331,7 @@ static pj_status_t logging_on_tx_msg(pjsip_tx_data *tdata)
 }
 
 /* The module instance. */
-static pjsip_module pjsua_msg_logger = 
+static pjsip_module mod_pjsua_msg_logger_initializer = 
 {
     NULL, NULL,				/* prev, next.		*/
     { "mod-pjsua-log", 13 },		/* Name.		*/
@@ -303,6 +349,23 @@ static pjsip_module pjsua_msg_logger =
 
 };
 
+static pjsip_module mod_pjsua_msg_logger[PJSUA_MAX_INSTANCES];
+static int is_initialized;
+
+static void mod_pjsua_msg_logger_initialize()
+{
+	int i;
+	if(is_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(mod_pjsua_msg_logger); i++)
+	{
+		mod_pjsua_msg_logger[i] = mod_pjsua_msg_logger_initializer;
+	}
+
+	is_initialized = 1;
+}
+
 
 /*****************************************************************************
  * Another simple module to handle incoming OPTIONS request
@@ -316,7 +379,9 @@ static pj_bool_t options_on_rx_request(pjsip_rx_data *rdata)
     pjmedia_transport_info tpinfo;
     pjmedia_sdp_session *sdp;
     const pjsip_hdr *cap_hdr;
-    pj_status_t status;
+	pj_status_t status;
+
+	pjsua_inst_id inst_id = rdata->tp_info.pool->factory->inst_id;
 
     /* Only want to handle OPTIONS requests */
     if (pjsip_method_cmp(&rdata->msg_info.msg->line.req.method,
@@ -326,15 +391,15 @@ static pj_bool_t options_on_rx_request(pjsip_rx_data *rdata)
     }
 
     /* Don't want to handle if shutdown is in progress */
-    if (pjsua_var.thread_quit_flag) {
-	pjsip_endpt_respond_stateless(pjsua_var.endpt, rdata, 
+    if (pjsua_var[inst_id].thread_quit_flag) {
+	pjsip_endpt_respond_stateless(pjsua_var[inst_id].endpt, rdata, 
 				      PJSIP_SC_TEMPORARILY_UNAVAILABLE, NULL,
 				      NULL, NULL);
 	return PJ_TRUE;
     }
 
     /* Create basic response. */
-    status = pjsip_endpt_create_response(pjsua_var.endpt, rdata, 200, NULL, 
+    status = pjsip_endpt_create_response(pjsua_var[inst_id].endpt, rdata, 200, NULL, 
 					 &tdata);
     if (status != PJ_SUCCESS) {
 	pjsua_perror(THIS_FILE, "Unable to create OPTIONS response", status);
@@ -342,25 +407,32 @@ static pj_bool_t options_on_rx_request(pjsip_rx_data *rdata)
     }
 
     /* Add Allow header */
-    cap_hdr = pjsip_endpt_get_capability(pjsua_var.endpt, PJSIP_H_ALLOW, NULL);
+    cap_hdr = pjsip_endpt_get_capability(pjsua_var[inst_id].endpt, PJSIP_H_ALLOW, NULL);
     if (cap_hdr) {
 	pjsip_msg_add_hdr(tdata->msg, 
 			  (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, cap_hdr));
     }
 
     /* Add Accept header */
-    cap_hdr = pjsip_endpt_get_capability(pjsua_var.endpt, PJSIP_H_ACCEPT, NULL);
+    cap_hdr = pjsip_endpt_get_capability(pjsua_var[inst_id].endpt, PJSIP_H_ACCEPT, NULL);
     if (cap_hdr) {
 	pjsip_msg_add_hdr(tdata->msg, 
 			  (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, cap_hdr));
     }
 
     /* Add Supported header */
-    cap_hdr = pjsip_endpt_get_capability(pjsua_var.endpt, PJSIP_H_SUPPORTED, NULL);
+    cap_hdr = pjsip_endpt_get_capability(pjsua_var[inst_id].endpt, PJSIP_H_SUPPORTED, NULL);
     if (cap_hdr) {
 	pjsip_msg_add_hdr(tdata->msg, 
 			  (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, cap_hdr));
-    }
+	}
+
+	/* Add Tnl-Supported header */
+	cap_hdr = pjsip_endpt_get_capability(pjsua_var[inst_id].endpt, PJSIP_H_TNL_SUPPORTED, NULL);
+	if (cap_hdr) {
+		pjsip_msg_add_hdr(tdata->msg, 
+			(pjsip_hdr*) pjsip_hdr_clone(tdata->pool, cap_hdr));
+	}
 
     /* Add Allow-Events header from the evsub module */
     cap_hdr = pjsip_evsub_get_allow_events_hdr(NULL);
@@ -370,23 +442,23 @@ static pj_bool_t options_on_rx_request(pjsip_rx_data *rdata)
     }
 
     /* Add User-Agent header */
-    if (pjsua_var.ua_cfg.user_agent.slen) {
+    if (pjsua_var[inst_id].ua_cfg.user_agent.slen) {
 	const pj_str_t USER_AGENT = { "User-Agent", 10};
 	pjsip_hdr *h;
 
 	h = (pjsip_hdr*) pjsip_generic_string_hdr_create(tdata->pool,
 							 &USER_AGENT,
-							 &pjsua_var.ua_cfg.user_agent);
+							 &pjsua_var[inst_id].ua_cfg.user_agent);
 	pjsip_msg_add_hdr(tdata->msg, h);
     }
 
     /* Get media socket info, make sure transport is ready */
-    if (pjsua_var.calls[0].med_tp) {
+    if (pjsua_var[inst_id].calls[0].med_tp) {
 	pjmedia_transport_info_init(&tpinfo);
-	pjmedia_transport_get_info(pjsua_var.calls[0].med_tp, &tpinfo);
+	pjmedia_transport_get_info(pjsua_var[inst_id].calls[0].med_tp, &tpinfo);
 
 	/* Add SDP body, using call0's RTP address */
-	status = pjmedia_endpt_create_sdp(pjsua_var.med_endpt, tdata->pool, 1,
+	status = pjmedia_endpt_create_sdp(pjsua_var[inst_id].med_endpt, tdata->pool, 1,
 					  &tpinfo.sock_info, &sdp);
 	if (status == PJ_SUCCESS) {
 	    pjsip_create_sdp_body(tdata->pool, sdp, &tdata->msg->body);
@@ -395,7 +467,7 @@ static pj_bool_t options_on_rx_request(pjsip_rx_data *rdata)
 
     /* Send response statelessly */
     pjsip_get_response_addr(tdata->pool, rdata, &res_addr);
-    status = pjsip_endpt_send_response(pjsua_var.endpt, &res_addr, tdata, NULL, NULL);
+    status = pjsip_endpt_send_response(pjsua_var[inst_id].endpt, &res_addr, tdata, NULL, NULL);
     if (status != PJ_SUCCESS)
 	pjsip_tx_data_dec_ref(tdata);
 
@@ -440,16 +512,18 @@ static pjsip_module pjsua_options_handler =
  */
 static pj_bool_t mod_pjsua_on_rx_request(pjsip_rx_data *rdata)
 {
-    pj_bool_t processed = PJ_FALSE;
+	pj_bool_t processed = PJ_FALSE;
 
-    PJSUA_LOCK();
+	pjsua_inst_id inst_id = rdata->tp_info.pool->factory->inst_id;
+
+    PJSUA_LOCK(inst_id);
 
     if (rdata->msg_info.msg->line.req.method.id == PJSIP_INVITE_METHOD) {
 
 	processed = pjsua_call_on_incoming(rdata);
     }
 
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(inst_id);
 
     return processed;
 }
@@ -472,30 +546,136 @@ static pj_bool_t mod_pjsua_on_rx_response(pjsip_rx_data *rdata)
     return PJ_FALSE;
 }
 
+static void log_rotate(pjsua_inst_id inst_id, int num_of_rotate) {
+	pj_status_t status;
+	char rotate_to[256], rotate_from[256];
+	pj_oshandle_t rotate_to_file, rotate_from_file;
+	pj_ssize_t numRead;
+	char buf[1024];
+	unsigned flags = PJ_O_RDWR;
+	int i;
+
+	pj_file_flush(pjsua_var[inst_id].log_file);
+	pj_file_close(pjsua_var[inst_id].log_file);
+
+	for (i = num_of_rotate; i > 0; i--) {
+		// check file exists.
+		sprintf(rotate_to, "%s.%d", pjsua_var[inst_id].log_cfg.log_filename.ptr, i);
+		if ((i-1) == 0)
+			sprintf(rotate_from, "%s", pjsua_var[inst_id].log_cfg.log_filename.ptr);
+		else
+			sprintf(rotate_from, "%s.%d", pjsua_var[inst_id].log_cfg.log_filename.ptr, i-1);
+
+		status = pj_file_open(pjsua_var[inst_id].pool, 
+			rotate_from,
+			PJ_O_RDONLY, 
+			&rotate_from_file,
+			NULL);
+
+		if (status != PJ_SUCCESS)
+			continue;
+
+		status = pj_file_open(pjsua_var[inst_id].pool, 
+			rotate_to,
+			0, 
+			&rotate_to_file,
+			NULL);
+		if (status == PJ_SUCCESS)
+			pj_file_close(rotate_to_file);
+
+		status = pj_file_open(pjsua_var[inst_id].pool, 
+			rotate_to,
+			PJ_O_RDWR, 
+			&rotate_to_file,
+			NULL);
+
+		if (status != PJ_SUCCESS)
+			continue;
+
+		pj_file_setpos(rotate_from_file, 0, PJ_SEEK_SET);
+
+		while(1) {
+			numRead = sizeof(buf);
+			status = pj_file_read(rotate_from_file, buf, &numRead);
+			if (status != PJ_SUCCESS || !numRead)
+				break;
+
+			status = pj_file_write(rotate_to_file, buf, &numRead);
+			if (status != PJ_SUCCESS)
+				break;		
+		}
+
+		pj_file_flush(rotate_to_file);
+		pj_file_close(rotate_to_file);
+
+		pj_file_close(rotate_from_file);
+	}
+
+	status = pj_file_open(pjsua_var[inst_id].pool, 
+		pjsua_var[inst_id].log_cfg.log_filename.ptr,
+		0, 
+		&rotate_to_file,
+		NULL);
+	if (status == PJ_SUCCESS)
+		pj_file_close(rotate_to_file);
+
+	// Reopen the log file to write
+	flags |= pjsua_var[inst_id].log_cfg.log_file_flags;
+	pj_file_open(pjsua_var[inst_id].pool, 
+		pjsua_var[inst_id].log_cfg.log_filename.ptr,
+		flags, 
+		&pjsua_var[inst_id].log_file,
+		&pjsua_var[inst_id].log_written_size);
+}
+
 
 /*****************************************************************************
  * Logging.
  */
 
 /* Log callback */
-static void log_writer(int level, const char *buffer, int len)
+static void log_writer(pjsua_inst_id inst_id, int level, const char *buffer, int len, int flush)
 {
     /* Write to file, stdout or application callback. */
 
-    if (pjsua_var.log_file) {
-	pj_ssize_t size = len;
-	pj_file_write(pjsua_var.log_file, buffer, &size);
-	/* This will slow things down considerably! Don't do it!
-	 pj_file_flush(pjsua_var.log_file);
-	*/
-    }
+	if (level <= (int)pjsua_var[inst_id].log_cfg.level) {
 
-    if (level <= (int)pjsua_var.log_cfg.console_level) {
-	if (pjsua_var.log_cfg.cb)
-	    (*pjsua_var.log_cfg.cb)(level, buffer, len);
-	else
-	    pj_log_write(level, buffer, len);
-    }
+		pj_thread_desc desc;
+		pj_thread_t *thread;
+		if (!pj_thread_is_registered(inst_id))
+			pj_thread_register(inst_id, "log_writer", desc, &thread);
+
+		pj_mutex_lock(pjsua_var[inst_id].log_mutex);
+		// file or syslog
+		if (pjsua_var[inst_id].log_file || 
+			(pjsua_var[inst_id].log_cfg.log_file_flags & PJ_O_SYSLOG) == PJ_O_SYSLOG) {
+			pj_ssize_t size = len;
+			int log_file_size = pjsua_var[inst_id].log_cfg.log_file_size * 1024;
+			pj_status_t status = pj_file_write(pjsua_var[inst_id].log_file, buffer, &size);
+			if (status == PJ_SUCCESS)
+				pjsua_var[inst_id].log_written_size += size;
+
+			if (log_file_size > 0 && pjsua_var[inst_id].log_written_size > log_file_size) {
+				log_rotate(inst_id, pjsua_var[inst_id].log_cfg.log_rotate_number);
+				pjsua_var[inst_id].log_written_size = 0;
+			}
+			/* This will slow things down considerably! Don't do it!
+			 pj_file_flush(pjsua_var[inst_id].log_file);
+			*/
+			if (flush)
+				pj_file_flush(pjsua_var[inst_id].log_file);
+		}
+
+		if (!pjsua_var[inst_id].log_cfg.disable_console_log) {
+			// callback or stdout
+			if (pjsua_var[inst_id].log_cfg.cb)
+				(*pjsua_var[inst_id].log_cfg.cb)(inst_id, level, buffer, len);
+			else
+				pj_log_write(inst_id, level, buffer, len, flush);
+		}
+
+		pj_mutex_unlock(pjsua_var[inst_id].log_mutex);
+	}
 }
 
 
@@ -503,36 +683,48 @@ static void log_writer(int level, const char *buffer, int len)
  * Application can call this function at any time (after pjsua_create(), of
  * course) to change logging settings.
  */
-PJ_DEF(pj_status_t) pjsua_reconfigure_logging(const pjsua_logging_config *cfg)
+PJ_DEF(pj_status_t) pjsua_reconfigure_logging(pjsua_inst_id inst_id, const pjsua_logging_config *cfg)
 {
     pj_status_t status;
 
     /* Save config. */
-    pjsua_logging_config_dup(pjsua_var.pool, &pjsua_var.log_cfg, cfg);
+    pjsua_logging_config_dup(pjsua_var[inst_id].pool, &pjsua_var[inst_id].log_cfg, cfg);
 
     /* Redirect log function to ours */
-    pj_log_set_log_func( &log_writer );
+    pj_log_set_log_func( &log_writer );  //INST_TODO
 
     /* Set decor */
-    pj_log_set_decor(pjsua_var.log_cfg.decor);
+    pj_log_set_decor(pjsua_var[inst_id].log_cfg.decor);
 
     /* Set log level */
-    pj_log_set_level(pjsua_var.log_cfg.level);
+	pj_log_set_level(inst_id, pjsua_var[inst_id].log_cfg.level);
+	
+	status = pj_mutex_create_recursive(pjsua_var[inst_id].pool, "pjsua_log", 
+		&pjsua_var[inst_id].log_mutex);
+	if (status != PJ_SUCCESS) {
+		pjsua_perror(THIS_FILE, "Unable to create log_mutex", status);
+		return status;
+	}
 
     /* Close existing file, if any */
-    if (pjsua_var.log_file) {
-	pj_file_close(pjsua_var.log_file);
-	pjsua_var.log_file = NULL;
+    if (pjsua_var[inst_id].log_file) {
+	pj_file_close(pjsua_var[inst_id].log_file);
+	pjsua_var[inst_id].log_file = NULL;
     }
 
     /* If output log file is desired, create the file: */
-    if (pjsua_var.log_cfg.log_filename.slen) {
-	unsigned flags = PJ_O_WRONLY;
-	flags |= pjsua_var.log_cfg.log_file_flags;
-	status = pj_file_open(pjsua_var.pool, 
-			      pjsua_var.log_cfg.log_filename.ptr,
+    if (pjsua_var[inst_id].log_cfg.log_filename.slen) {
+	unsigned flags = PJ_O_RDWR;
+	flags |= pjsua_var[inst_id].log_cfg.log_file_flags;
+
+	if ((flags & PJ_O_SYSLOG) == PJ_O_SYSLOG)
+		pj_syslog_facility(pjsua_var[inst_id].log_cfg.facility);
+
+	status = pj_file_open(pjsua_var[inst_id].pool, 
+			      pjsua_var[inst_id].log_cfg.log_filename.ptr,
 			      flags, 
-			      &pjsua_var.log_file);
+				  &pjsua_var[inst_id].log_file,
+				  &pjsua_var[inst_id].log_written_size);
 
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Error creating log file", status);
@@ -540,15 +732,17 @@ PJ_DEF(pj_status_t) pjsua_reconfigure_logging(const pjsua_logging_config *cfg)
 	}
     }
 
+	mod_pjsua_msg_logger_initialize(); // DEAN added
+
     /* Unregister msg logging if it's previously registered */
-    if (pjsua_msg_logger.id >= 0) {
-	pjsip_endpt_unregister_module(pjsua_var.endpt, &pjsua_msg_logger);
-	pjsua_msg_logger.id = -1;
+    if (mod_pjsua_msg_logger[inst_id].id >= 0) {
+	pjsip_endpt_unregister_module(pjsua_var[inst_id].endpt, &mod_pjsua_msg_logger[inst_id]);
+	mod_pjsua_msg_logger[inst_id].id = -1;
     }
 
     /* Enable SIP message logging */
-    if (pjsua_var.log_cfg.msg_logging)
-	pjsip_endpt_register_module(pjsua_var.endpt, &pjsua_msg_logger);
+    if (pjsua_var[inst_id].log_cfg.msg_logging)
+	pjsip_endpt_register_module(pjsua_var[inst_id].endpt, &mod_pjsua_msg_logger[inst_id]);
 
     return PJ_SUCCESS;
 }
@@ -563,12 +757,13 @@ static int worker_thread(void *arg)
 {
     enum { TIMEOUT = 10 };
 
-    PJ_UNUSED_ARG(arg);
+    //PJ_UNUSED_ARG(arg);
+	pjsua_inst_id inst_id = *((pjsua_inst_id *)arg);
 
-    while (!pjsua_var.thread_quit_flag) {
+    while (!pjsua_var[inst_id].thread_quit_flag) {
 	int count;
 
-	count = pjsua_handle_events(TIMEOUT);
+	count = pjsua_handle_events(inst_id, TIMEOUT);
 	if (count < 0)
 	    pj_thread_sleep(TIMEOUT);
     }
@@ -578,7 +773,7 @@ static int worker_thread(void *arg)
 
 
 /* Init random seed */
-static void init_random_seed(void)
+PJ_DEF(void) pj_init_random_seed(void)
 {
     pj_sockaddr addr;
     const pj_str_t *hostname;
@@ -609,22 +804,24 @@ static void init_random_seed(void)
 /*
  * Instantiate pjsua application.
  */
-PJ_DEF(pj_status_t) pjsua_create(void)
+PJ_DEF(pj_status_t) pjsua_create()
 {
     pj_status_t status;
 
+	pjsua_inst_id inst_id = alloc_inst_id();
+
     /* Init pjsua data */
-    init_data();
+    init_data(inst_id);
 
     /* Set default logging settings */
-    pjsua_logging_config_default(&pjsua_var.log_cfg);
+    pjsua_logging_config_default(&pjsua_var[inst_id].log_cfg);
 
     /* Init PJLIB: */
-    status = pj_init();
+    status = pj_init(inst_id);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Init random seed */
-    init_random_seed();
+    pj_init_random_seed();
 
     /* Init PJLIB-UTIL: */
     status = pjlib_util_init();
@@ -635,31 +832,39 @@ PJ_DEF(pj_status_t) pjsua_create(void)
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Set default sound device ID */
-    pjsua_var.cap_dev = PJMEDIA_AUD_DEFAULT_CAPTURE_DEV;
-    pjsua_var.play_dev = PJMEDIA_AUD_DEFAULT_PLAYBACK_DEV;
+    pjsua_var[inst_id].cap_dev = PJMEDIA_AUD_DEFAULT_CAPTURE_DEV;
+    pjsua_var[inst_id].play_dev = PJMEDIA_AUD_DEFAULT_PLAYBACK_DEV;
 
     /* Init caching pool. */
-    pj_caching_pool_init(&pjsua_var.cp, NULL, 0);
+    pj_caching_pool_init(inst_id, &pjsua_var[inst_id].cp, NULL, 0);
 
     /* Create memory pool for application. */
-    pjsua_var.pool = pjsua_pool_create("pjsua", 1000, 1000);
+    pjsua_var[inst_id].pool = pjsua_pool_create(inst_id, "pjsua", 1000, 1000);
     
-    PJ_ASSERT_RETURN(pjsua_var.pool, PJ_ENOMEM);
+    PJ_ASSERT_RETURN(pjsua_var[inst_id].pool, PJ_ENOMEM);
 
     /* Create mutex */
-    status = pj_mutex_create_recursive(pjsua_var.pool, "pjsua", 
-				       &pjsua_var.mutex);
+    status = pj_mutex_create_recursive(pjsua_var[inst_id].pool, "pjsua", 
+				       &pjsua_var[inst_id].mutex);
     if (status != PJ_SUCCESS) {
 	pjsua_perror(THIS_FILE, "Unable to create mutex", status);
 	return status;
-    }
+	}
+
+	/* Create log_mutex */
+	/*status = pj_mutex_create_recursive(pjsua_var[inst_id].pool, "pjsua_log", 
+		&pjsua_var[inst_id].log_mutex);
+	if (status != PJ_SUCCESS) {
+		pjsua_perror(THIS_FILE, "Unable to create log_mutex", status);
+		return status;
+	}*/
 
     /* Must create SIP endpoint to initialize SIP parser. The parser
      * is needed for example when application needs to call pjsua_verify_url().
      */
-    status = pjsip_endpt_create(&pjsua_var.cp.factory, 
+    status = pjsip_endpt_create(&pjsua_var[inst_id].cp.factory, 
 				pj_gethostname()->ptr, 
-				&pjsua_var.endpt);
+				&pjsua_var[inst_id].endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
@@ -672,7 +877,8 @@ PJ_DEF(pj_status_t) pjsua_create(void)
  * optional, and the default values will be used when the config is not
  * specified.
  */
-PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
+PJ_DEF(pj_status_t) pjsua_init( pjsua_inst_id inst_id, 
+				const pjsua_config *ua_cfg,
 				const pjsua_logging_config *log_cfg,
 				const pjsua_media_config *media_cfg)
 {
@@ -698,7 +904,7 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
 
     /* Initialize logging first so that info/errors can be captured */
     if (log_cfg) {
-	status = pjsua_reconfigure_logging(log_cfg);
+	status = pjsua_reconfigure_logging(inst_id, log_cfg);
 	if (status != PJ_SUCCESS)
 	    return status;
     }
@@ -720,15 +926,15 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
 	unsigned i;
 
 	/* Create DNS resolver */
-	status = pjsip_endpt_create_resolver(pjsua_var.endpt, 
-					     &pjsua_var.resolver);
+	status = pjsip_endpt_create_resolver(pjsua_var[inst_id].endpt, 
+					     &pjsua_var[inst_id].resolver);
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Error creating resolver", status);
 	    return status;
 	}
 
 	/* Configure nameserver for the DNS resolver */
-	status = pj_dns_resolver_set_ns(pjsua_var.resolver, 
+	status = pj_dns_resolver_set_ns(pjsua_var[inst_id].resolver, 
 					ua_cfg->nameserver_count,
 					ua_cfg->nameserver, NULL);
 	if (status != PJ_SUCCESS) {
@@ -737,7 +943,7 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
 	}
 
 	/* Set this DNS resolver to be used by the SIP resolver */
-	status = pjsip_endpt_set_resolver(pjsua_var.endpt, pjsua_var.resolver);
+	status = pjsip_endpt_set_resolver(pjsua_var[inst_id].endpt, pjsua_var[inst_id].resolver);
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Error setting DNS resolver", status);
 	    return status;
@@ -758,7 +964,7 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
     /* Init SIP UA: */
 
     /* Initialize transaction layer: */
-    status = pjsip_tsx_layer_init_module(pjsua_var.endpt);
+    status = pjsip_tsx_layer_init_module(pjsua_var[inst_id].endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
@@ -767,20 +973,20 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
     if (ua_cfg->hangup_forked_call) {
 	ua_init_param.on_dlg_forked = &on_dlg_forked;
     }
-    status = pjsip_ua_init_module( pjsua_var.endpt, &ua_init_param);
+    status = pjsip_ua_init_module( pjsua_var[inst_id].endpt, &ua_init_param);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
     /* Initialize Replaces support. */
-    status = pjsip_replaces_init_module( pjsua_var.endpt );
+    status = pjsip_replaces_init_module( pjsua_var[inst_id].endpt );
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Initialize 100rel support */
-    status = pjsip_100rel_init_module(pjsua_var.endpt);
+    status = pjsip_100rel_init_module(pjsua_var[inst_id].endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Initialize session timer support */
-    status = pjsip_timer_init_module(pjsua_var.endpt);
+    status = pjsip_timer_init_module(pjsua_var[inst_id].endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Initialize and register PJSUA application module. */
@@ -802,9 +1008,9 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
 	NULL,			    /* on_tsx_state()			*/
 	};
 
-	pjsua_var.mod = mod_initializer;
+	pjsua_var[inst_id].mod = mod_initializer;
 
-	status = pjsip_endpt_register_module(pjsua_var.endpt, &pjsua_var.mod);
+	status = pjsip_endpt_register_module(pjsua_var[inst_id].endpt, &pjsua_var[inst_id].mod);
 	PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
     }
 
@@ -814,10 +1020,10 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
     	pj_str_t hname = { "Route", 5};
 	pjsip_route_hdr *r;
 
-	pj_strdup_with_null(pjsua_var.pool, &tmp, &ua_cfg->outbound_proxy[i]);
+	pj_strdup_with_null(pjsua_var[inst_id].pool, &tmp, &ua_cfg->outbound_proxy[i]);
 
 	r = (pjsip_route_hdr*)
-	    pjsip_parse_hdr(pjsua_var.pool, &hname, tmp.ptr,
+	    pjsip_parse_hdr(inst_id, pjsua_var[inst_id].pool, &hname, tmp.ptr,
 			    (unsigned)tmp.slen, NULL);
 	if (r == NULL) {
 	    pjsua_perror(THIS_FILE, "Invalid outbound proxy URI",
@@ -825,10 +1031,10 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
 	    return PJSIP_EINVALIDURI;
 	}
 
-	if (pjsua_var.ua_cfg.force_lr) {
+	if (pjsua_var[inst_id].ua_cfg.force_lr) {
 	    pjsip_sip_uri *sip_url;
 	    if (!PJSIP_URI_SCHEME_IS_SIP(r->name_addr.uri) &&
-		!PJSIP_URI_SCHEME_IS_SIP(r->name_addr.uri))
+		!PJSIP_URI_SCHEME_IS_SIPS(r->name_addr.uri))
 	    {
 		return PJSIP_EINVALIDSCHEME;
 	    }
@@ -836,91 +1042,91 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
 	    sip_url->lr_param = 1;
 	}
 
-	pj_list_push_back(&pjsua_var.outbound_proxy, r);
+	pj_list_push_back(&pjsua_var[inst_id].outbound_proxy, r);
     }
     
 
     /* Initialize PJSUA call subsystem: */
-    status = pjsua_call_subsys_init(ua_cfg);
+    status = pjsua_call_subsys_init(inst_id, ua_cfg);
     if (status != PJ_SUCCESS)
 	goto on_error;
 
     /* Convert deprecated STUN settings */
-    if (pjsua_var.ua_cfg.stun_srv_cnt==0) {
-	if (pjsua_var.ua_cfg.stun_domain.slen) {
-	    pjsua_var.ua_cfg.stun_srv[pjsua_var.ua_cfg.stun_srv_cnt++] = 
-		pjsua_var.ua_cfg.stun_domain;
+    if (pjsua_var[inst_id].ua_cfg.stun_srv_cnt==0) {
+	if (pjsua_var[inst_id].ua_cfg.stun_domain.slen) {
+	    pjsua_var[inst_id].ua_cfg.stun_srv[pjsua_var[inst_id].ua_cfg.stun_srv_cnt++] = 
+		pjsua_var[inst_id].ua_cfg.stun_domain;
 	}
-	if (pjsua_var.ua_cfg.stun_host.slen) {
-	    pjsua_var.ua_cfg.stun_srv[pjsua_var.ua_cfg.stun_srv_cnt++] = 
-		pjsua_var.ua_cfg.stun_host;
+	if (pjsua_var[inst_id].ua_cfg.stun_host.slen) {
+	    pjsua_var[inst_id].ua_cfg.stun_srv[pjsua_var[inst_id].ua_cfg.stun_srv_cnt++] = 
+		pjsua_var[inst_id].ua_cfg.stun_host;
 	}
     }
 
     /* Start resolving STUN server */
-    status = resolve_stun_server(PJ_FALSE);
+    status = resolve_stun_server(inst_id, PJ_FALSE);
     if (status != PJ_SUCCESS && status != PJ_EPENDING) {
 	pjsua_perror(THIS_FILE, "Error resolving STUN server", status);
 	return status;
     }
 
     /* Initialize PJSUA media subsystem */
-    status = pjsua_media_subsys_init(media_cfg);
+    status = pjsua_media_subsys_init(inst_id, media_cfg);
     if (status != PJ_SUCCESS)
 	goto on_error;
 
 
     /* Init core SIMPLE module : */
-    status = pjsip_evsub_init_module(pjsua_var.endpt);
+    status = pjsip_evsub_init_module(pjsua_var[inst_id].endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
     /* Init presence module: */
-    status = pjsip_pres_init_module( pjsua_var.endpt, pjsip_evsub_instance());
+    status = pjsip_pres_init_module( pjsua_var[inst_id].endpt, pjsip_evsub_instance());
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Initialize MWI support */
-    status = pjsip_mwi_init_module(pjsua_var.endpt, pjsip_evsub_instance());
+    status = pjsip_mwi_init_module(pjsua_var[inst_id].endpt, pjsip_evsub_instance());
 
     /* Init PUBLISH module */
-    pjsip_publishc_init_module(pjsua_var.endpt);
+    pjsip_publishc_init_module(pjsua_var[inst_id].endpt);
 
     /* Init xfer/REFER module */
-    status = pjsip_xfer_init_module( pjsua_var.endpt );
+    status = pjsip_xfer_init_module( pjsua_var[inst_id].endpt );
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Init pjsua presence handler: */
-    status = pjsua_pres_init();
+    status = pjsua_pres_init(inst_id);
     if (status != PJ_SUCCESS)
 	goto on_error;
 
     /* Init out-of-dialog MESSAGE request handler. */
-    status = pjsua_im_init();
+    status = pjsua_im_init(inst_id);
     if (status != PJ_SUCCESS)
 	goto on_error;
 
     /* Register OPTIONS handler */
-    pjsip_endpt_register_module(pjsua_var.endpt, &pjsua_options_handler);
+    pjsip_endpt_register_module(pjsua_var[inst_id].endpt, &pjsua_options_handler);
 
     /* Add OPTIONS in Allow header */
-    pjsip_endpt_add_capability(pjsua_var.endpt, NULL, PJSIP_H_ALLOW,
+    pjsip_endpt_add_capability(pjsua_var[inst_id].endpt, NULL, PJSIP_H_ALLOW,
 			       NULL, 1, &STR_OPTIONS);
 
     /* Start worker thread if needed. */
-    if (pjsua_var.ua_cfg.thread_cnt) {
+    if (pjsua_var[inst_id].ua_cfg.thread_cnt) {
 	unsigned i;
 
-	if (pjsua_var.ua_cfg.thread_cnt > PJ_ARRAY_SIZE(pjsua_var.thread))
-	    pjsua_var.ua_cfg.thread_cnt = PJ_ARRAY_SIZE(pjsua_var.thread);
+	if (pjsua_var[inst_id].ua_cfg.thread_cnt > PJ_ARRAY_SIZE(pjsua_var[inst_id].thread))
+	    pjsua_var[inst_id].ua_cfg.thread_cnt = PJ_ARRAY_SIZE(pjsua_var[inst_id].thread);
 
-	for (i=0; i<pjsua_var.ua_cfg.thread_cnt; ++i) {
-	    status = pj_thread_create(pjsua_var.pool, "pjsua", &worker_thread,
-				      NULL, 0, 0, &pjsua_var.thread[i]);
+	for (i=0; i<pjsua_var[inst_id].ua_cfg.thread_cnt; ++i) {
+	    status = pj_thread_create(pjsua_var[inst_id].pool, "pjsua", &worker_thread,
+				      NULL, 0, 0, &pjsua_var[inst_id].thread[i]);
 	    if (status != PJ_SUCCESS)
 		goto on_error;
 	}
 	PJ_LOG(4,(THIS_FILE, "%d SIP worker threads created", 
-		  pjsua_var.ua_cfg.thread_cnt));
+		  pjsua_var[inst_id].ua_cfg.thread_cnt));
     } else {
 	PJ_LOG(4,(THIS_FILE, "No SIP worker threads created"));
     }
@@ -933,13 +1139,13 @@ PJ_DEF(pj_status_t) pjsua_init( const pjsua_config *ua_cfg,
     return PJ_SUCCESS;
 
 on_error:
-    pjsua_destroy();
+    pjsua_destroy(inst_id);
     return status;
 }
 
 
 /* Sleep with polling */
-static void busy_sleep(unsigned msec)
+static void busy_sleep(pjsua_inst_id inst_id, unsigned msec)
 {
     pj_time_val timeout, now;
 
@@ -950,24 +1156,38 @@ static void busy_sleep(unsigned msec)
     do {
 	int i;
 	i = msec / 10;
-	while (pjsua_handle_events(10) > 0 && i > 0)
+	while (pjsua_handle_events(inst_id, 10) > 0 && i > 0)
 	    --i;
 	pj_gettimeofday(&now);
     } while (PJ_TIME_VAL_LT(now, timeout));
 }
 
-/* Internal function to destroy STUN resolution session
- * (pj_stun_resolve).
- */
+static void stun_resolve_add_ref(pjsua_stun_resolve *sess)
+{
+    ++sess->ref_cnt;
+}
+
 static void destroy_stun_resolve(pjsua_stun_resolve *sess)
 {
-    PJSUA_LOCK();
+    sess->destroy_flag = PJ_TRUE;
+    if (sess->ref_cnt > 0)
+	return;
+
+    PJSUA_LOCK(sess->inst_id);
     pj_list_erase(sess);
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(sess->inst_id);
 
     pj_assert(sess->stun_sock==NULL);
     pj_pool_release(sess->pool);
 }
+
+static void stun_resolve_dec_ref(pjsua_stun_resolve *sess)
+{
+    --sess->ref_cnt;
+    if (sess->ref_cnt <= 0 && sess->destroy_flag)
+	destroy_stun_resolve(sess);
+}
+
 
 /* This is the internal function to be called when STUN resolution
  * session (pj_stun_resolve) has completed.
@@ -976,11 +1196,15 @@ static void stun_resolve_complete(pjsua_stun_resolve *sess)
 {
     pj_stun_resolve_result result;
 
+    if (sess->has_result)
+	goto on_return;
+
     pj_bzero(&result, sizeof(result));
     result.token = sess->token;
     result.status = sess->status;
     result.name = sess->srv[sess->idx];
     pj_memcpy(&result.addr, &sess->addr, sizeof(result.addr));
+    sess->has_result = PJ_TRUE;
 
     if (result.status == PJ_SUCCESS) {
 	char addr[PJ_INET6_ADDRSTRLEN+10];
@@ -996,8 +1220,11 @@ static void stun_resolve_complete(pjsua_stun_resolve *sess)
 	PJ_LOG(1,(THIS_FILE, "STUN resolution failed: %s", errmsg));
     }
 
-    sess->cb(&result);
+    stun_resolve_add_ref(sess);
+    sess->cb(sess->inst_id, &result);
+    stun_resolve_dec_ref(sess);
 
+on_return:
     if (!sess->blocking) {
 	destroy_stun_resolve(sess);
     }
@@ -1059,22 +1286,27 @@ static pj_bool_t test_stun_on_status(pj_stun_sock *stun_sock,
  */
 static void resolve_stun_entry(pjsua_stun_resolve *sess)
 {
+    stun_resolve_add_ref(sess);
+
     /* Loop while we have entry to try */
     for (; sess->idx < sess->count; ++sess->idx) {
 	const int af = pj_AF_INET();
+	char target[64];
 	pj_str_t hostpart;
 	pj_uint16_t port;
 	pj_stun_sock_cb stun_sock_cb;
 	
 	pj_assert(sess->idx < sess->count);
 
+	pj_ansi_snprintf(target, sizeof(target), "%.*s",
+			 (int)sess->srv[sess->idx].slen,
+			 sess->srv[sess->idx].ptr);
+
 	/* Parse the server entry into host:port */
 	sess->status = pj_sockaddr_parse2(af, 0, &sess->srv[sess->idx],
 					  &hostpart, &port, NULL);
 	if (sess->status != PJ_SUCCESS) {
-	    PJ_LOG(2,(THIS_FILE, "Invalid STUN server entry %.*s", 
-		      (int)sess->srv[sess->idx].slen, 
-		      sess->srv[sess->idx].ptr));
+	    PJ_LOG(2,(THIS_FILE, "Invalid STUN server entry %s", target));
 	    continue;
 	}
 	
@@ -1084,47 +1316,45 @@ static void resolve_stun_entry(pjsua_stun_resolve *sess)
 
 	pj_assert(sess->stun_sock == NULL);
 
-	PJ_LOG(4,(THIS_FILE, "Trying STUN server %.*s (%d of %d)..",
-		  (int)sess->srv[sess->idx].slen,
-		  sess->srv[sess->idx].ptr,
-		  sess->idx+1, sess->count));
+	PJ_LOG(4,(THIS_FILE, "Trying STUN server %s (%d of %d)..",
+		  target, sess->idx+1, sess->count));
 
 	/* Use STUN_sock to test this entry */
 	pj_bzero(&stun_sock_cb, sizeof(stun_sock_cb));
 	stun_sock_cb.on_status = &test_stun_on_status;
-	sess->status = pj_stun_sock_create(&pjsua_var.stun_cfg, "stunresolve",
+	sess->status = pj_stun_sock_create(&pjsua_var[sess->inst_id].stun_cfg, "stunresolve",
 					   pj_AF_INET(), &stun_sock_cb,
 					   NULL, sess, &sess->stun_sock);
 	if (sess->status != PJ_SUCCESS) {
 	    char errmsg[PJ_ERR_MSG_SIZE];
 	    pj_strerror(sess->status, errmsg, sizeof(errmsg));
 	    PJ_LOG(4,(THIS_FILE, 
-		     "Error creating STUN socket for %.*s: %s",
-		      (int)sess->srv[sess->idx].slen,
-		      sess->srv[sess->idx].ptr, errmsg));
+		     "Error creating STUN socket for %s: %s",
+		     target, errmsg));
 
 	    continue;
 	}
 
 	sess->status = pj_stun_sock_start(sess->stun_sock, &hostpart,
-					  port, pjsua_var.resolver);
+					  port, pjsua_var[sess->inst_id].resolver);
 	if (sess->status != PJ_SUCCESS) {
 	    char errmsg[PJ_ERR_MSG_SIZE];
 	    pj_strerror(sess->status, errmsg, sizeof(errmsg));
 	    PJ_LOG(4,(THIS_FILE, 
-		     "Error starting STUN socket for %.*s: %s",
-		      (int)sess->srv[sess->idx].slen,
-		      sess->srv[sess->idx].ptr, errmsg));
+		     "Error starting STUN socket for %s: %s",
+		     target, errmsg));
 
-	    pj_stun_sock_destroy(sess->stun_sock);
-	    sess->stun_sock = NULL;
+	    if (sess->stun_sock) {
+		pj_stun_sock_destroy(sess->stun_sock);
+		sess->stun_sock = NULL;
+	    }
 	    continue;
 	}
 
 	/* Done for now, testing will resume/complete asynchronously in
 	 * stun_sock_cb()
 	 */
-	return;
+	goto on_return;
     }
 
     if (sess->idx >= sess->count) {
@@ -1133,13 +1363,17 @@ static void resolve_stun_entry(pjsua_stun_resolve *sess)
 			  sess->status = PJ_EUNKNOWN);
 	stun_resolve_complete(sess);
     }
+
+on_return:
+    stun_resolve_dec_ref(sess);
 }
 
 
 /*
  * Resolve STUN server.
  */
-PJ_DEF(pj_status_t) pjsua_resolve_stun_servers( unsigned count,
+PJ_DEF(pj_status_t) pjsua_resolve_stun_servers( pjsua_inst_id inst_id, 
+						unsigned count,
 						pj_str_t srv[],
 						pj_bool_t wait,
 						void *token,
@@ -1148,11 +1382,11 @@ PJ_DEF(pj_status_t) pjsua_resolve_stun_servers( unsigned count,
     pj_pool_t *pool;
     pjsua_stun_resolve *sess;
     pj_status_t status;
-    unsigned i;
+	unsigned i;
 
     PJ_ASSERT_RETURN(count && srv && cb, PJ_EINVAL);
 
-    pool = pjsua_pool_create("stunres", 256, 256);
+    pool = pjsua_pool_create(inst_id, "stunres", 256, 256);
     if (!pool)
 	return PJ_ENOMEM;
 
@@ -1164,13 +1398,14 @@ PJ_DEF(pj_status_t) pjsua_resolve_stun_servers( unsigned count,
     sess->blocking = wait;
     sess->status = PJ_EPENDING;
     sess->srv = (pj_str_t*) pj_pool_calloc(pool, count, sizeof(pj_str_t));
+	sess->inst_id = inst_id;
     for (i=0; i<count; ++i) {
 	pj_strdup(pool, &sess->srv[i], &srv[i]);
     }
 
-    PJSUA_LOCK();
-    pj_list_push_back(&pjsua_var.stun_res, sess);
-    PJSUA_UNLOCK();
+    PJSUA_LOCK(inst_id);
+    pj_list_push_back(&pjsua_var[inst_id].stun_res, sess);
+    PJSUA_UNLOCK(inst_id);
 
     resolve_stun_entry(sess);
 
@@ -1178,7 +1413,7 @@ PJ_DEF(pj_status_t) pjsua_resolve_stun_servers( unsigned count,
 	return PJ_SUCCESS;
 
     while (sess->status == PJ_EPENDING) {
-	pjsua_handle_events(50);
+		pjsua_handle_events(inst_id, 50);
     }
 
     status = sess->status;
@@ -1190,15 +1425,16 @@ PJ_DEF(pj_status_t) pjsua_resolve_stun_servers( unsigned count,
 /*
  * Cancel pending STUN resolution.
  */
-PJ_DEF(pj_status_t) pjsua_cancel_stun_resolution( void *token,
+PJ_DEF(pj_status_t) pjsua_cancel_stun_resolution( pjsua_inst_id inst_id, 
+						  void *token,
 						  pj_bool_t notify_cb)
 {
     pjsua_stun_resolve *sess;
     unsigned cancelled_count = 0;
 
-    PJSUA_LOCK();
-    sess = pjsua_var.stun_res.next;
-    while (sess != &pjsua_var.stun_res) {
+    PJSUA_LOCK(inst_id);
+    sess = pjsua_var[inst_id].stun_res.next;
+    while (sess != &pjsua_var[inst_id].stun_res) {
 	pjsua_stun_resolve *next = sess->next;
 
 	if (sess->token == token) {
@@ -1209,7 +1445,7 @@ PJ_DEF(pj_status_t) pjsua_cancel_stun_resolution( void *token,
 		result.token = token;
 		result.status = PJ_ECANCELLED;
 
-		sess->cb(&result);
+		sess->cb(inst_id, &result);
 	    }
 
 	    destroy_stun_resolve(sess);
@@ -1218,132 +1454,149 @@ PJ_DEF(pj_status_t) pjsua_cancel_stun_resolution( void *token,
 
 	sess = next;
     }
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(inst_id);
+
+	if (!cancelled_count)
+		PJ_LOG(4, ("pjsua_core.c", "pjsua_cancel_stun_resolution() cancelled_count not found."));
 
     return cancelled_count ? PJ_SUCCESS : PJ_ENOTFOUND;
 }
 
-static void internal_stun_resolve_cb(const pj_stun_resolve_result *result)
+static void internal_stun_resolve_cb(pjsua_inst_id inst_id, const pj_stun_resolve_result *result)
 {
-    pjsua_var.stun_status = result->status;
+    pjsua_var[inst_id].stun_status = result->status;
     if (result->status == PJ_SUCCESS) {
-	pj_memcpy(&pjsua_var.stun_srv, &result->addr, sizeof(result->addr));
+	pj_memcpy(&pjsua_var[inst_id].stun_srv, &result->addr, sizeof(result->addr));
     }
 }
 
 /*
  * Resolve STUN server.
  */
-pj_status_t resolve_stun_server(pj_bool_t wait)
+pj_status_t resolve_stun_server(pjsua_inst_id inst_id, pj_bool_t wait)
 {
-    if (pjsua_var.stun_status == PJ_EUNKNOWN) {
+    if (pjsua_var[inst_id].stun_status == PJ_EUNKNOWN) {
 	pj_status_t status;
 
 	/* Initialize STUN configuration */
-	pj_stun_config_init(&pjsua_var.stun_cfg, &pjsua_var.cp.factory, 0,
-			    pjsip_endpt_get_ioqueue(pjsua_var.endpt),
-			    pjsip_endpt_get_timer_heap(pjsua_var.endpt));
+	pj_stun_config_init(inst_id, &pjsua_var[inst_id].stun_cfg, &pjsua_var[inst_id].cp.factory, 0,
+			    pjsip_endpt_get_ioqueue(pjsua_var[inst_id].endpt),
+			    pjsip_endpt_get_timer_heap(pjsua_var[inst_id].endpt));
 
 	/* Start STUN server resolution */
-	if (pjsua_var.ua_cfg.stun_srv_cnt) {
-	    pjsua_var.stun_status = PJ_EPENDING;
-	    status = pjsua_resolve_stun_servers(pjsua_var.ua_cfg.stun_srv_cnt,
-						pjsua_var.ua_cfg.stun_srv,
+	if (pjsua_var[inst_id].ua_cfg.stun_srv_cnt) {
+	    pjsua_var[inst_id].stun_status = PJ_EPENDING;
+	    status = pjsua_resolve_stun_servers(inst_id, 
+						pjsua_var[inst_id].ua_cfg.stun_srv_cnt,
+						pjsua_var[inst_id].ua_cfg.stun_srv,
 						wait, NULL,
 						&internal_stun_resolve_cb);
 	    if (wait || status != PJ_SUCCESS) {
-		pjsua_var.stun_status = status;
+		pjsua_var[inst_id].stun_status = status;
 	    }
 	} else {
-	    pjsua_var.stun_status = PJ_SUCCESS;
+	    pjsua_var[inst_id].stun_status = PJ_SUCCESS;
 	}
 
-    } else if (pjsua_var.stun_status == PJ_EPENDING) {
-	/* STUN server resolution has been started, wait for the
-	 * result.
-	 */
-	if (wait) {
-	    while (pjsua_var.stun_status == PJ_EPENDING) {
-		if (pjsua_var.thread[0] == NULL)
-		    pjsua_handle_events(10);
-		else
-		    pj_thread_sleep(10);
-	    }
-	}
+    } else if (pjsua_var[inst_id].stun_status == PJ_EPENDING) {
+		/* STUN server resolution has been started, wait for the
+		 * result.
+		 */
+		if (wait) {
+			while (pjsua_var[inst_id].stun_status == PJ_EPENDING) {
+				if (pjsua_var[inst_id].thread[0] == NULL)
+					pjsua_handle_events(inst_id, 10);
+				else
+					pj_thread_sleep(10);
+			}
+		}
     }
 
-    if (pjsua_var.stun_status != PJ_EPENDING &&
-	pjsua_var.stun_status != PJ_SUCCESS &&
-	pjsua_var.ua_cfg.stun_ignore_failure)
+    if (pjsua_var[inst_id].stun_status != PJ_EPENDING &&
+	pjsua_var[inst_id].stun_status != PJ_SUCCESS &&
+	pjsua_var[inst_id].ua_cfg.stun_ignore_failure)
     {
 	PJ_LOG(2,(THIS_FILE, 
 		  "Ignoring STUN resolution failure (by setting)"));
-	pjsua_var.stun_status = PJ_SUCCESS;
+	pjsua_var[inst_id].stun_status = PJ_SUCCESS;
     }
 
-    return pjsua_var.stun_status;
+    return pjsua_var[inst_id].stun_status;
 }
 
 /*
  * Destroy pjsua.
  */
-PJ_DEF(pj_status_t) pjsua_destroy2(unsigned flags)
+PJ_DEF(pj_status_t) pjsua_destroy2(pjsua_inst_id inst_id, unsigned flags)
 {
-    int i;  /* Must be signed */
+	int i;  /* Must be signed */
 
-    if (pjsua_var.endpt) {
+    if (pjsua_var[inst_id].endpt) {
 	PJ_LOG(4,(THIS_FILE, "Shutting down, flags=%d...", flags));
     }
 
     /* Signal threads to quit: */
-    pjsua_var.thread_quit_flag = 1;
+    pjsua_var[inst_id].thread_quit_flag = 1;
 
     /* Wait worker threads to quit: */
-    for (i=0; i<(int)pjsua_var.ua_cfg.thread_cnt; ++i) {
-	if (pjsua_var.thread[i]) {
-	    pj_status_t status;
-	    status = pj_thread_join(pjsua_var.thread[i]);
-	    if (status != PJ_SUCCESS) {
-		PJ_PERROR(4,(THIS_FILE, status, "Error joining worker thread"));
-		pj_thread_sleep(1000);
-	    }
-	    pj_thread_destroy(pjsua_var.thread[i]);
-	    pjsua_var.thread[i] = NULL;
+	for (i=0; i<(int)pjsua_var[inst_id].ua_cfg.thread_cnt; ++i) {
+		// Wait for worker thread terminated.
+		if (pjsua_var[inst_id].thread[i]) {
+			pj_status_t status;
+			status = pj_thread_join(pjsua_var[inst_id].thread[i]);
+			if (status != PJ_SUCCESS) {
+				PJ_PERROR(4,(THIS_FILE, status, "Error joining worker thread"));
+				pj_thread_sleep(1000);
+			}
+			pj_thread_destroy(pjsua_var[inst_id].thread[i]);
+			pjsua_var[inst_id].thread[i] = NULL;
+		}
+
+		// Wait for monitor thread terminated.
+		if (pjsua_var[inst_id].monitor_thread[i]) {
+			pj_status_t status;
+			status = pj_thread_join(pjsua_var[inst_id].monitor_thread[i]);
+			if (status != PJ_SUCCESS) {
+				PJ_PERROR(4,(THIS_FILE, status, "Error joining monitor thread"));
+				pj_thread_sleep(1000);
+			}
+			pj_thread_destroy(pjsua_var[inst_id].monitor_thread[i]);
+			pjsua_var[inst_id].monitor_thread[i] = NULL;
+		}
 	}
-    }
     
-    if (pjsua_var.endpt) {
+    if (pjsua_var[inst_id].endpt) {
 	unsigned max_wait;
 
 	/* Terminate all calls. */
 	if ((flags & PJSUA_DESTROY_NO_TX_MSG) == 0) {
-	    pjsua_call_hangup_all();
+	    pjsua_call_hangup_all(inst_id);
 	}
 
 	/* Set all accounts to offline */
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.acc); ++i) {
-	    if (!pjsua_var.acc[i].valid)
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i) {
+	    if (!pjsua_var[inst_id].acc[i].valid)
 		continue;
-	    pjsua_var.acc[i].online_status = PJ_FALSE;
-	    pj_bzero(&pjsua_var.acc[i].rpid, sizeof(pjrpid_element));
+	    pjsua_var[inst_id].acc[i].online_status = PJ_FALSE;
+	    pj_bzero(&pjsua_var[inst_id].acc[i].rpid, sizeof(pjrpid_element));
 	}
 
 	/* Terminate all presence subscriptions. */
-	pjsua_pres_shutdown(flags);
+	pjsua_pres_shutdown(inst_id, flags);
 
 	/* Destroy media (to shutdown media transports etc) */
-	pjsua_media_subsys_destroy(flags);
+	pjsua_media_subsys_destroy(inst_id, flags);
 
 	/* Wait for sometime until all publish client sessions are done
 	 * (ticket #364)
 	 */
 	/* First stage, get the maximum wait time */
 	max_wait = 100;
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.acc); ++i) {
-	    if (!pjsua_var.acc[i].valid)
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i) {
+	    if (!pjsua_var[inst_id].acc[i].valid)
 		continue;
-	    if (pjsua_var.acc[i].cfg.unpublish_max_wait_time_msec > max_wait)
-		max_wait = pjsua_var.acc[i].cfg.unpublish_max_wait_time_msec;
+	    if (pjsua_var[inst_id].acc[i].cfg.unpublish_max_wait_time_msec > max_wait)
+		max_wait = pjsua_var[inst_id].acc[i].cfg.unpublish_max_wait_time_msec;
 	}
 	
 	/* No waiting if RX is disabled */
@@ -1354,42 +1607,42 @@ PJ_DEF(pj_status_t) pjsua_destroy2(unsigned flags)
 	/* Second stage, wait for unpublications to complete */
 	for (i=0; i<(int)(max_wait/50); ++i) {
 	    unsigned j;
-	    for (j=0; j<PJ_ARRAY_SIZE(pjsua_var.acc); ++j) {
-		if (!pjsua_var.acc[j].valid)
+	    for (j=0; j<PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++j) {
+		if (!pjsua_var[inst_id].acc[j].valid)
 		    continue;
 
-		if (pjsua_var.acc[j].publish_sess)
+		if (pjsua_var[inst_id].acc[j].publish_sess)
 		    break;
 	    }
-	    if (j != PJ_ARRAY_SIZE(pjsua_var.acc))
-		busy_sleep(50);
+	    if (j != PJ_ARRAY_SIZE(pjsua_var[inst_id].acc))
+		busy_sleep(inst_id, 50);
 	    else
 		break;
 	}
 
 	/* Third stage, forcefully destroy unfinished unpublications */
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.acc); ++i) {
-	    if (pjsua_var.acc[i].publish_sess) {
-		pjsip_publishc_destroy(pjsua_var.acc[i].publish_sess);
-		pjsua_var.acc[i].publish_sess = NULL;
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i) {
+	    if (pjsua_var[inst_id].acc[i].publish_sess) {
+		pjsip_publishc_destroy(pjsua_var[inst_id].acc[i].publish_sess);
+		pjsua_var[inst_id].acc[i].publish_sess = NULL;
 	    }
 	}
 
 	/* Unregister all accounts */
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.acc); ++i) {
-	    if (!pjsua_var.acc[i].valid)
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i) {
+	    if (!pjsua_var[inst_id].acc[i].valid)
 		continue;
 
-	    if (pjsua_var.acc[i].regc && (flags & PJSUA_DESTROY_NO_TX_MSG)==0)
+	    if (pjsua_var[inst_id].acc[i].regc && (flags & PJSUA_DESTROY_NO_TX_MSG)==0)
 	    {
-		pjsua_acc_set_registration(i, PJ_FALSE);
+		pjsua_acc_set_registration(inst_id, i, PJ_FALSE);
 	    }
 	}
 
 	/* Terminate any pending STUN resolution */
-	if (!pj_list_empty(&pjsua_var.stun_res)) {
-	    pjsua_stun_resolve *sess = pjsua_var.stun_res.next;
-	    while (sess != &pjsua_var.stun_res) {
+	if (!pj_list_empty(&pjsua_var[inst_id].stun_res)) {
+	    pjsua_stun_resolve *sess = pjsua_var[inst_id].stun_res.next;
+	    while (sess != &pjsua_var[inst_id].stun_res) {
 		pjsua_stun_resolve *next = sess->next;
 		destroy_stun_resolve(sess);
 		sess = next;
@@ -1399,11 +1652,11 @@ PJ_DEF(pj_status_t) pjsua_destroy2(unsigned flags)
 	/* Wait until all unregistrations are done (ticket #364) */
 	/* First stage, get the maximum wait time */
 	max_wait = 100;
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.acc); ++i) {
-	    if (!pjsua_var.acc[i].valid)
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i) {
+	    if (!pjsua_var[inst_id].acc[i].valid)
 		continue;
-	    if (pjsua_var.acc[i].cfg.unreg_timeout > max_wait)
-		max_wait = pjsua_var.acc[i].cfg.unreg_timeout;
+	    if (pjsua_var[inst_id].acc[i].cfg.unreg_timeout > max_wait)
+		max_wait = pjsua_var[inst_id].acc[i].cfg.unreg_timeout;
 	}
 	
 	/* No waiting if RX is disabled */
@@ -1414,15 +1667,15 @@ PJ_DEF(pj_status_t) pjsua_destroy2(unsigned flags)
 	/* Second stage, wait for unregistrations to complete */
 	for (i=0; i<(int)(max_wait/50); ++i) {
 	    unsigned j;
-	    for (j=0; j<PJ_ARRAY_SIZE(pjsua_var.acc); ++j) {
-		if (!pjsua_var.acc[j].valid)
+	    for (j=0; j<PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++j) {
+		if (!pjsua_var[inst_id].acc[j].valid)
 		    continue;
 
-		if (pjsua_var.acc[j].regc)
+		if (pjsua_var[inst_id].acc[j].regc)
 		    break;
 	    }
-	    if (j != PJ_ARRAY_SIZE(pjsua_var.acc))
-		busy_sleep(50);
+	    if (j != PJ_ARRAY_SIZE(pjsua_var[inst_id].acc))
+		busy_sleep(inst_id, 50);
 	    else
 		break;
 	}
@@ -1432,71 +1685,84 @@ PJ_DEF(pj_status_t) pjsua_destroy2(unsigned flags)
 	 * transports shutdown to complete: 
 	 */
 	if (i < 20 && (flags & PJSUA_DESTROY_NO_RX_MSG) == 0) {
-	    busy_sleep(1000 - i*50);
+	    busy_sleep(inst_id, 1000 - i*50);
 	}
 
 	PJ_LOG(4,(THIS_FILE, "Destroying..."));
+
+	// DEAN. This is tricky way to solve multiple instances logging issue.
+	// Don't destroy first endpoint.
+	if (inst_id == 0 && get_max_instances() > 1)
+		return PJ_SUCCESS;
 
 	/* Must destroy endpoint first before destroying pools in
 	 * buddies or accounts, since shutting down transaction layer
 	 * may emit events which trigger some buddy or account callbacks
 	 * to be called.
 	 */
-	pjsip_endpt_destroy(pjsua_var.endpt);
-	pjsua_var.endpt = NULL;
+	pjsip_endpt_destroy(pjsua_var[inst_id].endpt);
+	pjsua_var[inst_id].endpt = NULL;
 
 	/* Destroy pool in the buddy object */
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.buddy); ++i) {
-	    if (pjsua_var.buddy[i].pool) {
-		pj_pool_release(pjsua_var.buddy[i].pool);
-		pjsua_var.buddy[i].pool = NULL;
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].buddy); ++i) {
+	    if (pjsua_var[inst_id].buddy[i].pool) {
+		pj_pool_release(pjsua_var[inst_id].buddy[i].pool);
+		pjsua_var[inst_id].buddy[i].pool = NULL;
 	    }
 	}
 
 	/* Destroy accounts */
-	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var.acc); ++i) {
-	    if (pjsua_var.acc[i].pool) {
-		pj_pool_release(pjsua_var.acc[i].pool);
-		pjsua_var.acc[i].pool = NULL;
+	for (i=0; i<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].acc); ++i) {
+	    if (pjsua_var[inst_id].acc[i].pool) {
+		pj_pool_release(pjsua_var[inst_id].acc[i].pool);
+		pjsua_var[inst_id].acc[i].pool = NULL;
 	    }
 	}
-    }
+	}
 
-    /* Destroy mutex */
-    if (pjsua_var.mutex) {
-	pj_mutex_destroy(pjsua_var.mutex);
-	pjsua_var.mutex = NULL;
-    }
+	/* Destroy log_mutex */
+	if (pjsua_var[inst_id].log_mutex) {
+		pj_mutex_destroy(pjsua_var[inst_id].log_mutex);
+		pjsua_var[inst_id].log_mutex = NULL;
+	}
+
+	/* Destroy mutex */
+	if (pjsua_var[inst_id].mutex) {
+		pj_mutex_destroy(pjsua_var[inst_id].mutex);
+		pjsua_var[inst_id].mutex = NULL;
+	}
 
     /* Destroy pool and pool factory. */
-    if (pjsua_var.pool) {
-	pj_pool_release(pjsua_var.pool);
-	pjsua_var.pool = NULL;
-	pj_caching_pool_destroy(&pjsua_var.cp);
+    if (pjsua_var[inst_id].pool) {
+	pj_pool_release(pjsua_var[inst_id].pool);
+	pjsua_var[inst_id].pool = NULL;
+	pj_caching_pool_destroy(&pjsua_var[inst_id].cp);
 
 	PJ_LOG(4,(THIS_FILE, "PJSUA destroyed..."));
 
 	/* End logging */
-	if (pjsua_var.log_file) {
-	    pj_file_close(pjsua_var.log_file);
-	    pjsua_var.log_file = NULL;
+	if (pjsua_var[inst_id].log_file) {
+	    pj_file_close(pjsua_var[inst_id].log_file);
+	    pjsua_var[inst_id].log_file = NULL;
 	}
 
 	/* Shutdown PJLIB */
-	pj_shutdown();
+	pj_shutdown(inst_id);
     }
 
     /* Clear pjsua_var */
-    pj_bzero(&pjsua_var, sizeof(pjsua_var));
+    pj_bzero(&pjsua_var[inst_id], sizeof(pjsua_var[inst_id]));
 
     /* Done. */
     return PJ_SUCCESS;
 }
 
 
-PJ_DEF(pj_status_t) pjsua_destroy(void)
+PJ_DEF(pj_status_t) pjsua_destroy(pjsua_inst_id inst_id)
 {
-    return pjsua_destroy2(0);
+	// DEAN. Destroy without waiting response message.
+	// 2014-10-25 DEAN.Waiting response message.
+    return pjsua_destroy2(inst_id, 0);
 }
 
 
@@ -1507,7 +1773,7 @@ PJ_DEF(pj_status_t) pjsua_destroy(void)
  *
  * @return		PJ_SUCCESS on success, or the appropriate error code.
  */
-PJ_DEF(pj_status_t) pjsua_start(void)
+PJ_DEF(pj_status_t) pjsua_start(pjsua_inst_id inst_id)
 {
     pj_status_t status;
 
@@ -1515,11 +1781,11 @@ PJ_DEF(pj_status_t) pjsua_start(void)
     if (status != PJ_SUCCESS)
 	return status;
 
-    status = pjsua_media_subsys_start();
+    status = pjsua_media_subsys_start(inst_id);
     if (status != PJ_SUCCESS)
 	return status;
 
-    status = pjsua_pres_start();
+    status = pjsua_pres_start(inst_id);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -1531,7 +1797,7 @@ PJ_DEF(pj_status_t) pjsua_start(void)
  * Poll pjsua for events, and if necessary block the caller thread for
  * the specified maximum interval (in miliseconds).
  */
-PJ_DEF(int) pjsua_handle_events(unsigned msec_timeout)
+PJ_DEF(int) pjsua_handle_events(pjsua_inst_id inst_id, unsigned msec_timeout)
 {
 #if defined(PJ_SYMBIAN) && PJ_SYMBIAN != 0
 
@@ -1547,7 +1813,7 @@ PJ_DEF(int) pjsua_handle_events(unsigned msec_timeout)
     tv.msec = msec_timeout;
     pj_time_val_normalize(&tv);
 
-    status = pjsip_endpt_handle_events2(pjsua_var.endpt, &tv, &count);
+    status = pjsip_endpt_handle_events2(pjsua_var[inst_id].endpt, &tv, &count);
 
     if (status != PJ_SUCCESS)
 	return -status;
@@ -1561,11 +1827,12 @@ PJ_DEF(int) pjsua_handle_events(unsigned msec_timeout)
 /*
  * Create memory pool.
  */
-PJ_DEF(pj_pool_t*) pjsua_pool_create( const char *name, pj_size_t init_size,
+PJ_DEF(pj_pool_t*) pjsua_pool_create( pjsua_inst_id inst_id, 
+					  const char *name, pj_size_t init_size,
 				      pj_size_t increment)
 {
     /* Pool factory is thread safe, no need to lock */
-    return pj_pool_create(&pjsua_var.cp.factory, name, init_size, increment, 
+    return pj_pool_create(&pjsua_var[inst_id].cp.factory, name, init_size, increment, 
 			  NULL);
 }
 
@@ -1575,26 +1842,26 @@ PJ_DEF(pj_pool_t*) pjsua_pool_create( const char *name, pj_size_t init_size,
  * needed for example to register module, create transports, etc.
  * Probably is only valid after #pjsua_init() is called.
  */
-PJ_DEF(pjsip_endpoint*) pjsua_get_pjsip_endpt(void)
+PJ_DEF(pjsip_endpoint*) pjsua_get_pjsip_endpt(pjsua_inst_id inst_id)
 {
-    return pjsua_var.endpt;
+    return pjsua_var[inst_id].endpt;
 }
 
 /*
  * Internal function to get media endpoint instance.
  * Only valid after #pjsua_init() is called.
  */
-PJ_DEF(pjmedia_endpt*) pjsua_get_pjmedia_endpt(void)
+PJ_DEF(pjmedia_endpt*) pjsua_get_pjmedia_endpt(pjsua_inst_id inst_id)
 {
-    return pjsua_var.med_endpt;
+    return pjsua_var[inst_id].med_endpt;
 }
 
 /*
  * Internal function to get PJSUA pool factory.
  */
-PJ_DEF(pj_pool_factory*) pjsua_get_pool_factory(void)
+PJ_DEF(pj_pool_factory*) pjsua_get_pool_factory(pjsua_inst_id inst_id)
 {
-    return &pjsua_var.cp.factory;
+    return &pjsua_var[inst_id].cp.factory;
 }
 
 /*****************************************************************************
@@ -1623,11 +1890,13 @@ static void on_tp_state_callback(pjsip_transport *tp,
 				 pjsip_transport_state state,
 				 const pjsip_transport_state_info *info)
 {
-    if (pjsua_var.ua_cfg.cb.on_transport_state) {
-	(*pjsua_var.ua_cfg.cb.on_transport_state)(tp, state, info);
+	pjsua_inst_id inst_id = tp->pool->factory->inst_id;
+
+    if (pjsua_var[inst_id].ua_cfg.cb.on_transport_state) {
+	(*pjsua_var[inst_id].ua_cfg.cb.on_transport_state)(tp, state, info);
     }
-    if (pjsua_var.old_tp_cb) {
-	(*pjsua_var.old_tp_cb)(tp, state, info);
+    if (pjsua_var[inst_id].old_tp_cb) {
+	(*pjsua_var[inst_id].old_tp_cb)(tp, state, info);
     }
     pjsua_acc_on_tp_state_changed(tp, state, info);
 }
@@ -1636,7 +1905,8 @@ static void on_tp_state_callback(pjsip_transport *tp,
  * Create and initialize SIP socket (and possibly resolve public
  * address via STUN, depending on config).
  */
-static pj_status_t create_sip_udp_sock(int af,
+static pj_status_t create_sip_udp_sock(pjsua_inst_id inst_id, 
+					   int af,
 				       const pjsua_transport_config *cfg,
 				       pj_sock_t *p_sock,
 				       pj_sockaddr *p_pub_addr)
@@ -1649,10 +1919,10 @@ static pj_status_t create_sip_udp_sock(int af,
     pj_status_t status;
 
     /* Make sure STUN server resolution has completed */
-    status = resolve_stun_server(PJ_TRUE);
+    status = resolve_stun_server(inst_id, PJ_TRUE);
     if (status != PJ_SUCCESS) {
 	pjsua_perror(THIS_FILE, "Error resolving STUN server", status);
-	return status;
+	//return status; //DEAN. Ignore stun failed situation to meet UDP packet blocked environment.
     }
 
     /* Initialize bound address */
@@ -1703,8 +1973,8 @@ static pj_status_t create_sip_udp_sock(int af,
 	port = pj_sockaddr_get_port(&bound_addr);
     }
 
-    if (pjsua_var.stun_srv.addr.sa_family != 0) {
-	pj_ansi_strcpy(stun_ip_addr,pj_inet_ntoa(pjsua_var.stun_srv.ipv4.sin_addr));
+    if (pjsua_var[inst_id].stun_srv.addr.sa_family != 0) {
+	pj_ansi_strcpy(stun_ip_addr,pj_inet_ntoa(pjsua_var[inst_id].stun_srv.ipv4.sin_addr));
 	stun_srv = pj_str(stun_ip_addr);
     } else {
 	stun_srv.slen = 0;
@@ -1731,14 +2001,21 @@ static pj_status_t create_sip_udp_sock(int af,
 	    return PJ_EAFNOTSUP;
 	}
 
-	status = pjstun_get_mapped_addr(&pjsua_var.cp.factory, 1, &sock,
-				         &stun_srv, pj_ntohs(pjsua_var.stun_srv.ipv4.sin_port),
-					 &stun_srv, pj_ntohs(pjsua_var.stun_srv.ipv4.sin_port),
+	status = pjstun_get_mapped_addr(&pjsua_var[inst_id].cp.factory, 1, &sock,
+				         &stun_srv, pj_ntohs(pjsua_var[inst_id].stun_srv.ipv4.sin_port),
+					 &stun_srv, pj_ntohs(pjsua_var[inst_id].stun_srv.ipv4.sin_port),
 				         &p_pub_addr->ipv4);
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Error contacting STUN server", status);
-	    pj_sock_close(sock);
-	    return status;
+		// dean, for bug with AOLink
+		if (status == PJLIB_UTIL_ESTUNNOTRESPOND && 
+			pjsua_var[inst_id].stun_mapped_addr.sin_family == PJ_AF_INET) {
+				pj_memcpy(&p_pub_addr->ipv4, &pjsua_var[inst_id].stun_mapped_addr, sizeof(pj_sockaddr_in));
+				status = PJ_SUCCESS;
+		} else {
+			pj_sock_close(sock);
+			return status;
+		}
 	}
 
     } else {
@@ -1772,7 +2049,8 @@ static pj_status_t create_sip_udp_sock(int af,
 /*
  * Create SIP transport.
  */
-PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
+PJ_DEF(pj_status_t) pjsua_transport_create( pjsua_inst_id inst_id, 
+						pjsip_transport_type_e type,
 					    const pjsua_transport_config *cfg,
 					    pjsua_transport_id *p_id)
 {
@@ -1780,15 +2058,15 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
     unsigned id;
     pj_status_t status;
 
-    PJSUA_LOCK();
+    PJSUA_LOCK(inst_id);
 
     /* Find empty transport slot */
-    for (id=0; id < PJ_ARRAY_SIZE(pjsua_var.tpdata); ++id) {
-	if (pjsua_var.tpdata[id].data.ptr == NULL)
+    for (id=0; id < PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata); ++id) {
+	if (pjsua_var[inst_id].tpdata[id].data.ptr == NULL)
 	    break;
     }
 
-    if (id == PJ_ARRAY_SIZE(pjsua_var.tpdata)) {
+    if (id == PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata)) {
 	status = PJ_ETOOMANY;
 	pjsua_perror(THIS_FILE, "Error creating transport", status);
 	goto on_return;
@@ -1828,7 +2106,7 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 	/* Create the socket and possibly resolve the address with STUN 
 	 * (only when public address is not specified).
 	 */
-	status = create_sip_udp_sock(pjsip_transport_type_get_af(type),
+	status = create_sip_udp_sock(inst_id, pjsip_transport_type_get_af(type),
 				     cfg, &sock, &pub_addr);
 	if (status != PJ_SUCCESS)
 	    goto on_return;
@@ -1838,7 +2116,7 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 	addr_name.port = pj_sockaddr_get_port(&pub_addr);
 
 	/* Create UDP transport */
-	status = pjsip_udp_transport_attach2(pjsua_var.endpt, type, sock,
+	status = pjsip_udp_transport_attach2(pjsua_var[inst_id].endpt, type, sock,
 					     &addr_name, 1, &tp);
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Error creating SIP UDP transport", 
@@ -1849,9 +2127,9 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 
 
 	/* Save the transport */
-	pjsua_var.tpdata[id].type = type;
-	pjsua_var.tpdata[id].local_name = tp->local_name;
-	pjsua_var.tpdata[id].data.tp = tp;
+	pjsua_var[inst_id].tpdata[id].type = type;
+	pjsua_var[inst_id].tpdata[id].local_name = tp->local_name;
+	pjsua_var[inst_id].tpdata[id].data.tp = tp;
 
 #if defined(PJ_HAS_TCP) && PJ_HAS_TCP!=0
 
@@ -1897,7 +2175,7 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 		  sizeof(cfg->qos_params));
 
 	/* Create the TCP transport */
-	status = pjsip_tcp_transport_start3(pjsua_var.endpt, &tcp_cfg, &tcp);
+	status = pjsip_tcp_transport_start3(pjsua_var[inst_id].endpt, &tcp_cfg, &tcp);
 
 	if (status != PJ_SUCCESS) {
 	    pjsua_perror(THIS_FILE, "Error creating SIP TCP listener", 
@@ -1906,9 +2184,9 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 	}
 
 	/* Save the transport */
-	pjsua_var.tpdata[id].type = type;
-	pjsua_var.tpdata[id].local_name = tcp->addr_name;
-	pjsua_var.tpdata[id].data.factory = tcp;
+	pjsua_var[inst_id].tpdata[id].type = type;
+	pjsua_var[inst_id].tpdata[id].local_name = tcp->addr_name;
+	pjsua_var[inst_id].tpdata[id].data.factory = tcp;
 
 #endif	/* PJ_HAS_TCP */
 
@@ -1950,7 +2228,7 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 	if (cfg->public_addr.slen)
 	    a_name.host = cfg->public_addr;
 
-	status = pjsip_tls_transport_start(pjsua_var.endpt, 
+	status = pjsip_tls_transport_start(pjsua_var[inst_id].endpt, 
 					   &cfg->tls_setting, 
 					   &local_addr, &a_name, 1, &tls);
 	if (status != PJ_SUCCESS) {
@@ -1960,9 +2238,9 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 	}
 
 	/* Save the transport */
-	pjsua_var.tpdata[id].type = type;
-	pjsua_var.tpdata[id].local_name = tls->addr_name;
-	pjsua_var.tpdata[id].data.factory = tls;
+	pjsua_var[inst_id].tpdata[id].type = type;
+	pjsua_var[inst_id].tpdata[id].local_name = tls->addr_name;
+	pjsua_var[inst_id].tpdata[id].data.factory = tls;
 #endif
 
     } else {
@@ -1972,15 +2250,15 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
     }
 
     /* Set transport state callback */
-    if (pjsua_var.ua_cfg.cb.on_transport_state) {
+    {
 	pjsip_tp_state_callback tpcb;
 	pjsip_tpmgr *tpmgr;
 
-	tpmgr = pjsip_endpt_get_tpmgr(pjsua_var.endpt);
+	tpmgr = pjsip_endpt_get_tpmgr(pjsua_var[inst_id].endpt);
 	tpcb = pjsip_tpmgr_get_state_cb(tpmgr);
 
 	if (tpcb != &on_tp_state_callback) {
-	    pjsua_var.old_tp_cb = tpcb;
+	    pjsua_var[inst_id].old_tp_cb = tpcb;
 	    pjsip_tpmgr_set_state_cb(tpmgr, &on_tp_state_callback);
 	}
     }
@@ -1992,7 +2270,7 @@ PJ_DEF(pj_status_t) pjsua_transport_create( pjsip_transport_type_e type,
 
 on_return:
 
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(inst_id);
 
     return status;
 }
@@ -2006,29 +2284,31 @@ PJ_DEF(pj_status_t) pjsua_transport_register( pjsip_transport *tp,
 {
     unsigned id;
 
-    PJSUA_LOCK();
+	pjsua_inst_id inst_id = tp->pool->factory->inst_id;
+
+    PJSUA_LOCK(inst_id);
 
     /* Find empty transport slot */
-    for (id=0; id < PJ_ARRAY_SIZE(pjsua_var.tpdata); ++id) {
-	if (pjsua_var.tpdata[id].data.ptr == NULL)
+    for (id=0; id < PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata); ++id) {
+	if (pjsua_var[inst_id].tpdata[id].data.ptr == NULL)
 	    break;
     }
 
-    if (id == PJ_ARRAY_SIZE(pjsua_var.tpdata)) {
+    if (id == PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata)) {
 	pjsua_perror(THIS_FILE, "Error creating transport", PJ_ETOOMANY);
-	PJSUA_UNLOCK();
+	PJSUA_UNLOCK(inst_id);
 	return PJ_ETOOMANY;
     }
 
     /* Save the transport */
-    pjsua_var.tpdata[id].type = (pjsip_transport_type_e) tp->key.type;
-    pjsua_var.tpdata[id].local_name = tp->local_name;
-    pjsua_var.tpdata[id].data.tp = tp;
+    pjsua_var[inst_id].tpdata[id].type = (pjsip_transport_type_e) tp->key.type;
+    pjsua_var[inst_id].tpdata[id].local_name = tp->local_name;
+    pjsua_var[inst_id].tpdata[id].data.tp = tp;
 
     /* Return the ID */
     if (p_id) *p_id = id;
 
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(inst_id);
 
     return PJ_SUCCESS;
 }
@@ -2037,17 +2317,18 @@ PJ_DEF(pj_status_t) pjsua_transport_register( pjsip_transport *tp,
 /*
  * Enumerate all transports currently created in the system.
  */
-PJ_DEF(pj_status_t) pjsua_enum_transports( pjsua_transport_id id[],
+PJ_DEF(pj_status_t) pjsua_enum_transports( pjsua_inst_id inst_id, 
+					   pjsua_transport_id id[],
 					   unsigned *p_count )
 {
     unsigned i, count;
 
-    PJSUA_LOCK();
+    PJSUA_LOCK(inst_id);
 
-    for (i=0, count=0; i<PJ_ARRAY_SIZE(pjsua_var.tpdata) && count<*p_count; 
+    for (i=0, count=0; i<PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata) && count<*p_count; 
 	 ++i) 
     {
-	if (!pjsua_var.tpdata[i].data.ptr)
+	if (!pjsua_var[inst_id].tpdata[i].data.ptr)
 	    continue;
 
 	id[count++] = i;
@@ -2055,7 +2336,7 @@ PJ_DEF(pj_status_t) pjsua_enum_transports( pjsua_transport_id id[],
 
     *p_count = count;
 
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(inst_id);
 
     return PJ_SUCCESS;
 }
@@ -2064,29 +2345,30 @@ PJ_DEF(pj_status_t) pjsua_enum_transports( pjsua_transport_id id[],
 /*
  * Get information about transports.
  */
-PJ_DEF(pj_status_t) pjsua_transport_get_info( pjsua_transport_id id,
+PJ_DEF(pj_status_t) pjsua_transport_get_info( pjsua_inst_id inst_id,
+						  pjsua_transport_id id,
 					      pjsua_transport_info *info)
 {
-    pjsua_transport_data *t = &pjsua_var.tpdata[id];
+    pjsua_transport_data *t = &pjsua_var[inst_id].tpdata[id];
     pj_status_t status;
 
     pj_bzero(info, sizeof(*info));
 
     /* Make sure id is in range. */
-    PJ_ASSERT_RETURN(id>=0 && id<(int)PJ_ARRAY_SIZE(pjsua_var.tpdata), 
+    PJ_ASSERT_RETURN(id>=0 && id<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata), 
 		     PJ_EINVAL);
 
     /* Make sure that transport exists */
-    PJ_ASSERT_RETURN(pjsua_var.tpdata[id].data.ptr != NULL, PJ_EINVAL);
+    PJ_ASSERT_RETURN(pjsua_var[inst_id].tpdata[id].data.ptr != NULL, PJ_EINVAL);
 
-    PJSUA_LOCK();
+    PJSUA_LOCK(inst_id);
 
-    if (pjsua_var.tpdata[id].type == PJSIP_TRANSPORT_UDP) {
+    if (t->type == PJSIP_TRANSPORT_UDP) {
 
 	pjsip_transport *tp = t->data.tp;
 
 	if (tp == NULL) {
-	    PJSUA_UNLOCK();
+	    PJSUA_UNLOCK(inst_id);
 	    return PJ_EINVALIDOP;
 	}
     
@@ -2102,19 +2384,23 @@ PJ_DEF(pj_status_t) pjsua_transport_get_info( pjsua_transport_id id,
 
 	status = PJ_SUCCESS;
 
-    } else if (pjsua_var.tpdata[id].type == PJSIP_TRANSPORT_TCP) {
+    } else if (t->type == PJSIP_TRANSPORT_TCP ||
+	       t->type == PJSIP_TRANSPORT_TLS)
+    {
 
 	pjsip_tpfactory *factory = t->data.factory;
 
 	if (factory == NULL) {
-	    PJSUA_UNLOCK();
+	    PJSUA_UNLOCK(inst_id);
 	    return PJ_EINVALIDOP;
 	}
     
 	info->id = id;
 	info->type = t->type;
-	info->type_name = pj_str("TCP");
-	info->info = pj_str("TCP transport");
+	info->type_name = (t->type==PJSIP_TRANSPORT_TCP)? pj_str("TCP"):
+							  pj_str("TLS");
+	info->info = (t->type==PJSIP_TRANSPORT_TCP)? pj_str("TCP transport"):
+						     pj_str("TLS transport");
 	info->flag = factory->flag;
 	info->addr_len = sizeof(factory->local_addr);
 	info->local_addr = factory->local_addr;
@@ -2129,7 +2415,7 @@ PJ_DEF(pj_status_t) pjsua_transport_get_info( pjsua_transport_id id,
     }
 
 
-    PJSUA_UNLOCK();
+    PJSUA_UNLOCK(inst_id);
 
     return status;
 }
@@ -2138,15 +2424,16 @@ PJ_DEF(pj_status_t) pjsua_transport_get_info( pjsua_transport_id id,
 /*
  * Disable a transport or re-enable it.
  */
-PJ_DEF(pj_status_t) pjsua_transport_set_enable( pjsua_transport_id id,
+PJ_DEF(pj_status_t) pjsua_transport_set_enable( pjsua_inst_id inst_id, 
+						pjsua_transport_id id,
 						pj_bool_t enabled)
 {
     /* Make sure id is in range. */
-    PJ_ASSERT_RETURN(id>=0 && id<(int)PJ_ARRAY_SIZE(pjsua_var.tpdata), 
+    PJ_ASSERT_RETURN(id>=0 && id<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata), 
 		     PJ_EINVAL);
 
     /* Make sure that transport exists */
-    PJ_ASSERT_RETURN(pjsua_var.tpdata[id].data.ptr != NULL, PJ_EINVAL);
+    PJ_ASSERT_RETURN(pjsua_var[inst_id].tpdata[id].data.ptr != NULL, PJ_EINVAL);
 
 
     /* To be done!! */
@@ -2160,28 +2447,29 @@ PJ_DEF(pj_status_t) pjsua_transport_set_enable( pjsua_transport_id id,
 /*
  * Close the transport.
  */
-PJ_DEF(pj_status_t) pjsua_transport_close( pjsua_transport_id id,
+PJ_DEF(pj_status_t) pjsua_transport_close( pjsua_inst_id inst_id, 
+					   pjsua_transport_id id,
 					   pj_bool_t force )
 {
     pj_status_t status;
 
     /* Make sure id is in range. */
-    PJ_ASSERT_RETURN(id>=0 && id<(int)PJ_ARRAY_SIZE(pjsua_var.tpdata), 
+    PJ_ASSERT_RETURN(id>=0 && id<(int)PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata), 
 		     PJ_EINVAL);
 
     /* Make sure that transport exists */
-    PJ_ASSERT_RETURN(pjsua_var.tpdata[id].data.ptr != NULL, PJ_EINVAL);
+    PJ_ASSERT_RETURN(pjsua_var[inst_id].tpdata[id].data.ptr != NULL, PJ_EINVAL);
 
     /* Note: destroy() may not work if there are objects still referencing
      *	     the transport.
      */
     if (force) {
-	switch (pjsua_var.tpdata[id].type) {
+	switch (pjsua_var[inst_id].tpdata[id].type) {
 	case PJSIP_TRANSPORT_UDP:
-	    status = pjsip_transport_shutdown(pjsua_var.tpdata[id].data.tp);
+	    status = pjsip_transport_shutdown(pjsua_var[inst_id].tpdata[id].data.tp);
 	    if (status  != PJ_SUCCESS)
 		return status;
-	    status = pjsip_transport_destroy(pjsua_var.tpdata[id].data.tp);
+	    status = pjsip_transport_destroy(pjsua_var[inst_id].tpdata[id].data.tp);
 	    if (status != PJ_SUCCESS)
 		return status;
 	    break;
@@ -2191,8 +2479,8 @@ PJ_DEF(pj_status_t) pjsua_transport_close( pjsua_transport_id id,
 	    /* This will close the TCP listener, but existing TCP/TLS
 	     * connections (if any) will still linger 
 	     */
-	    status = (*pjsua_var.tpdata[id].data.factory->destroy)
-			(pjsua_var.tpdata[id].data.factory);
+	    status = (*pjsua_var[inst_id].tpdata[id].data.factory->destroy)
+			(pjsua_var[inst_id].tpdata[id].data.factory);
 	    if (status != PJ_SUCCESS)
 		return status;
 
@@ -2209,13 +2497,13 @@ PJ_DEF(pj_status_t) pjsua_transport_close( pjsua_transport_id id,
 	 * transport is closed thus it can't cleanup PJSUA transport
 	 * descriptor.
 	 */
-	switch (pjsua_var.tpdata[id].type) {
+	switch (pjsua_var[inst_id].tpdata[id].type) {
 	case PJSIP_TRANSPORT_UDP:
-	    return pjsip_transport_shutdown(pjsua_var.tpdata[id].data.tp);
+	    return pjsip_transport_shutdown(pjsua_var[inst_id].tpdata[id].data.tp);
 	case PJSIP_TRANSPORT_TLS:
 	case PJSIP_TRANSPORT_TCP:
-	    return (*pjsua_var.tpdata[id].data.factory->destroy)
-			(pjsua_var.tpdata[id].data.factory);
+	    return (*pjsua_var[inst_id].tpdata[id].data.factory->destroy)
+			(pjsua_var[inst_id].tpdata[id].data.factory);
 	default:
 	    return PJ_EINVAL;
 	}
@@ -2223,8 +2511,8 @@ PJ_DEF(pj_status_t) pjsua_transport_close( pjsua_transport_id id,
 
     /* Cleanup pjsua data when force is applied */
     if (force) {
-	pjsua_var.tpdata[id].type = PJSIP_TRANSPORT_UNSPECIFIED;
-	pjsua_var.tpdata[id].data.ptr = NULL;
+	pjsua_var[inst_id].tpdata[id].type = PJSIP_TRANSPORT_UNSPECIFIED;
+	pjsua_var[inst_id].tpdata[id].data.ptr = NULL;
     }
 
     return PJ_SUCCESS;
@@ -2235,21 +2523,22 @@ PJ_DEF(pj_status_t) pjsua_transport_close( pjsua_transport_id id,
  * Add additional headers etc in msg_data specified by application
  * when sending requests.
  */
-void pjsua_process_msg_data(pjsip_tx_data *tdata,
+void pjsua_process_msg_data(pjsua_inst_id inst_id, 
+				pjsip_tx_data *tdata,
 			    const pjsua_msg_data *msg_data)
 {
     pj_bool_t allow_body;
     const pjsip_hdr *hdr;
 
     /* Always add User-Agent */
-    if (pjsua_var.ua_cfg.user_agent.slen && 
+    if (pjsua_var[inst_id].ua_cfg.user_agent.slen && 
 	tdata->msg->type == PJSIP_REQUEST_MSG) 
     {
 	const pj_str_t STR_USER_AGENT = { "User-Agent", 10 };
 	pjsip_hdr *h;
 	h = (pjsip_hdr*)pjsip_generic_string_hdr_create(tdata->pool, 
 							&STR_USER_AGENT, 
-							&pjsua_var.ua_cfg.user_agent);
+							&pjsua_var[inst_id].ua_cfg.user_agent);
 	pjsip_msg_add_hdr(tdata->msg, h);
     }
 
@@ -2360,7 +2649,8 @@ void pjsua_parse_media_type( pj_pool_t *pool,
 /*
  * Internal function to init transport selector from transport id.
  */
-void pjsua_init_tpselector(pjsua_transport_id tp_id,
+void pjsua_init_tpselector(pjsua_inst_id inst_id,
+			   pjsua_transport_id tp_id,
 			   pjsip_tpselector *sel)
 {
     pjsua_transport_data *tpdata;
@@ -2370,8 +2660,8 @@ void pjsua_init_tpselector(pjsua_transport_id tp_id,
     if (tp_id == PJSUA_INVALID_ID)
 	return;
 
-    pj_assert(tp_id >= 0 && tp_id < (int)PJ_ARRAY_SIZE(pjsua_var.tpdata));
-    tpdata = &pjsua_var.tpdata[tp_id];
+    pj_assert(tp_id >= 0 && tp_id < (int)PJ_ARRAY_SIZE(pjsua_var[inst_id].tpdata));
+    tpdata = &pjsua_var[inst_id].tpdata[tp_id];
 
     flag = pjsip_transport_get_flag_from_type(tpdata->type);
 
@@ -2386,56 +2676,63 @@ void pjsua_init_tpselector(pjsua_transport_id tp_id,
 
 
 /* Callback upon NAT detection completion */
-static void nat_detect_cb(void *user_data, 
+static void nat_detect_cb(pjsua_inst_id inst_id, 
+			  void *local_addr, void *mapped_addr, 
 			  const pj_stun_nat_detect_result *res)
 {
-    PJ_UNUSED_ARG(user_data);
+    pjsua_var[inst_id].nat_in_progress = PJ_FALSE;
+    pjsua_var[inst_id].nat_status = res->status;
+    pjsua_var[inst_id].nat_type = res->nat_type;
 
-    pjsua_var.nat_in_progress = PJ_FALSE;
-    pjsua_var.nat_status = res->status;
-    pjsua_var.nat_type = res->nat_type;
-
+    // DEAN modified
+    #if 0
     if (pjsua_var.ua_cfg.cb.on_nat_detect) {
 	(*pjsua_var.ua_cfg.cb.on_nat_detect)(res);
     }
+    #else
+    if (pjsua_var[inst_id].ua_cfg.cb.on_nat_detect_natnl) {
+	(*pjsua_var[inst_id].ua_cfg.cb.on_nat_detect_natnl)(inst_id,
+									local_addr, mapped_addr, res);
+    }
+    #endif
 }
 
 
 /*
  * Detect NAT type.
  */
-PJ_DEF(pj_status_t) pjsua_detect_nat_type()
+PJ_DEF(pj_status_t) pjsua_detect_nat_type(pjsua_inst_id inst_id)
 {
     pj_status_t status;
 
-    if (pjsua_var.nat_in_progress)
+    if (pjsua_var[inst_id].nat_in_progress)
 	return PJ_SUCCESS;
 
     /* Make sure STUN server resolution has completed */
-    status = resolve_stun_server(PJ_TRUE);
+    status = resolve_stun_server(inst_id, PJ_TRUE);
     if (status != PJ_SUCCESS) {
-	pjsua_var.nat_status = status;
-	pjsua_var.nat_type = PJ_STUN_NAT_TYPE_ERR_UNKNOWN;
+	pjsua_var[inst_id].nat_status = status;
+	pjsua_var[inst_id].nat_type = PJ_STUN_NAT_TYPE_ERR_UNKNOWN;
 	return status;
     }
 
     /* Make sure we have STUN */
-    if (pjsua_var.stun_srv.ipv4.sin_family == 0) {
-	pjsua_var.nat_status = PJNATH_ESTUNINSERVER;
+    if (pjsua_var[inst_id].stun_srv.ipv4.sin_family == 0) {
+	pjsua_var[inst_id].nat_status = PJNATH_ESTUNINSERVER;
 	return PJNATH_ESTUNINSERVER;
     }
 
-    status = pj_stun_detect_nat_type(&pjsua_var.stun_srv.ipv4, 
-				     &pjsua_var.stun_cfg, 
-				     NULL, &nat_detect_cb);
+    status = pj_stun_detect_nat_type(inst_id, &pjsua_var[inst_id].stun_srv.ipv4, 
+				     &pjsua_var[inst_id].stun_cfg, 
+					 NULL, &nat_detect_cb);
 
     if (status != PJ_SUCCESS) {
-	pjsua_var.nat_status = status;
-	pjsua_var.nat_type = PJ_STUN_NAT_TYPE_ERR_UNKNOWN;
+	pjsua_var[inst_id].nat_status = status;
+	pjsua_var[inst_id].nat_type = PJ_STUN_NAT_TYPE_ERR_UNKNOWN;
 	return status;
     }
 
-    pjsua_var.nat_in_progress = PJ_TRUE;
+    pjsua_var[inst_id].nat_in_progress = PJ_TRUE;
 
     return PJ_SUCCESS;
 }
@@ -2444,16 +2741,17 @@ PJ_DEF(pj_status_t) pjsua_detect_nat_type()
 /*
  * Get NAT type.
  */
-PJ_DEF(pj_status_t) pjsua_get_nat_type(pj_stun_nat_type *type)
+PJ_DEF(pj_status_t) pjsua_get_nat_type(pjsua_inst_id inst_id, 
+									   pj_stun_nat_type *type)
 {
-    *type = pjsua_var.nat_type;
-    return pjsua_var.nat_status;
+    *type = pjsua_var[inst_id].nat_type;
+    return pjsua_var[inst_id].nat_status;
 }
 
 /*
  * Verify that valid url is given.
  */
-PJ_DEF(pj_status_t) pjsua_verify_url(const char *c_url)
+PJ_DEF(pj_status_t) pjsua_verify_url(pjsua_inst_id inst_id, const char *c_url)
 {
     pjsip_uri *p;
     pj_pool_t *pool;
@@ -2462,13 +2760,13 @@ PJ_DEF(pj_status_t) pjsua_verify_url(const char *c_url)
 
     if (!len) return PJSIP_EINVALIDURI;
 
-    pool = pj_pool_create(&pjsua_var.cp.factory, "check%p", 1024, 0, NULL);
+    pool = pj_pool_create(&pjsua_var[inst_id].cp.factory, "check%p", 1024, 0, NULL);
     if (!pool) return PJ_ENOMEM;
 
     url = (char*) pj_pool_alloc(pool, len+1);
     pj_ansi_strcpy(url, c_url);
 
-    p = pjsip_parse_uri(pool, url, len, 0);
+    p = pjsip_parse_uri(inst_id, pool, url, len, 0);
 
     pj_pool_release(pool);
     return p ? 0 : PJSIP_EINVALIDURI;
@@ -2477,7 +2775,8 @@ PJ_DEF(pj_status_t) pjsua_verify_url(const char *c_url)
 /*
  * Verify that valid SIP url is given.
  */
-PJ_DEF(pj_status_t) pjsua_verify_sip_url(const char *c_url)
+PJ_DEF(pj_status_t) pjsua_verify_sip_url(pjsua_inst_id inst_id,
+										 const char *c_url)
 {
     pjsip_uri *p;
     pj_pool_t *pool;
@@ -2486,13 +2785,13 @@ PJ_DEF(pj_status_t) pjsua_verify_sip_url(const char *c_url)
 
     if (!len) return PJSIP_EINVALIDURI;
 
-    pool = pj_pool_create(&pjsua_var.cp.factory, "check%p", 1024, 0, NULL);
+    pool = pj_pool_create(&pjsua_var[inst_id].cp.factory, "check%p", 1024, 0, NULL);
     if (!pool) return PJ_ENOMEM;
 
     url = (char*) pj_pool_alloc(pool, len+1);
     pj_ansi_strcpy(url, c_url);
 
-    p = pjsip_parse_uri(pool, url, len, 0);
+    p = pjsip_parse_uri(inst_id, pool, url, len, 0);
     if (!p || (pj_stricmp2(pjsip_uri_get_scheme(p), "sip") != 0 &&
 	       pj_stricmp2(pjsip_uri_get_scheme(p), "sips") != 0))
     {
@@ -2506,39 +2805,40 @@ PJ_DEF(pj_status_t) pjsua_verify_sip_url(const char *c_url)
 /*
  * Schedule a timer entry. 
  */
-PJ_DEF(pj_status_t) pjsua_schedule_timer( pj_timer_entry *entry,
+PJ_DEF(pj_status_t) pjsua_schedule_timer( pjsua_inst_id inst_id,
+					  pj_timer_entry *entry,
 					  const pj_time_val *delay)
 {
-    return pjsip_endpt_schedule_timer(pjsua_var.endpt, entry, delay);
+    return pjsip_endpt_schedule_timer(pjsua_var[inst_id].endpt, entry, delay);
 }
 
 /*
  * Cancel the previously scheduled timer.
  *
  */
-PJ_DEF(void) pjsua_cancel_timer(pj_timer_entry *entry)
+PJ_DEF(void) pjsua_cancel_timer(pjsua_inst_id inst_id, pj_timer_entry *entry)
 {
-    pjsip_endpt_cancel_timer(pjsua_var.endpt, entry);
+    pjsip_endpt_cancel_timer(pjsua_var[inst_id].endpt, entry);
 }
 
 /** 
  * Normalize route URI (check for ";lr" and append one if it doesn't
  * exist and pjsua_config.force_lr is set.
  */
-pj_status_t normalize_route_uri(pj_pool_t *pool, pj_str_t *uri)
+pj_status_t normalize_route_uri(pjsua_inst_id inst_id, pj_pool_t *pool, pj_str_t *uri)
 {
     pj_str_t tmp_uri;
     pj_pool_t *tmp_pool;
     pjsip_uri *uri_obj;
     pjsip_sip_uri *sip_uri;
 
-    tmp_pool = pjsua_pool_create("tmplr%p", 512, 512);
+    tmp_pool = pjsua_pool_create(inst_id, "tmplr%p", 512, 512);
     if (!tmp_pool)
 	return PJ_ENOMEM;
 
     pj_strdup_with_null(tmp_pool, &tmp_uri, uri);
 
-    uri_obj = pjsip_parse_uri(tmp_pool, tmp_uri.ptr, tmp_uri.slen, 0);
+    uri_obj = pjsip_parse_uri(inst_id, tmp_pool, tmp_uri.ptr, tmp_uri.slen, 0);
     if (!uri_obj) {
 	PJ_LOG(1,(THIS_FILE, "Invalid route URI: %.*s", 
 		  (int)uri->slen, uri->ptr));
@@ -2547,7 +2847,7 @@ pj_status_t normalize_route_uri(pj_pool_t *pool, pj_str_t *uri)
     }
 
     if (!PJSIP_URI_SCHEME_IS_SIP(uri_obj) && 
-	!PJSIP_URI_SCHEME_IS_SIP(uri_obj))
+	!PJSIP_URI_SCHEME_IS_SIPS(uri_obj))
     {
 	PJ_LOG(1,(THIS_FILE, "Route URI must be SIP URI: %.*s", 
 		  (int)uri->slen, uri->ptr));
@@ -2558,7 +2858,7 @@ pj_status_t normalize_route_uri(pj_pool_t *pool, pj_str_t *uri)
     sip_uri = (pjsip_sip_uri*) pjsip_uri_get_uri(uri_obj);
 
     /* Done if force_lr is disabled or if lr parameter is present */
-    if (!pjsua_var.ua_cfg.force_lr || sip_uri->lr_param) {
+    if (!pjsua_var[inst_id].ua_cfg.force_lr || sip_uri->lr_param) {
 	pj_pool_release(tmp_pool);
 	return PJ_SUCCESS;
     }
@@ -2588,7 +2888,7 @@ pj_status_t normalize_route_uri(pj_pool_t *pool, pj_str_t *uri)
  * This is a utility function to dump the stack states to log, using
  * verbosity level 3.
  */
-PJ_DEF(void) pjsua_dump(pj_bool_t detail)
+PJ_DEF(void) pjsua_dump(pjsua_inst_id inst_id, pj_bool_t detail)
 {
     unsigned old_decor;
     unsigned i;
@@ -2601,13 +2901,13 @@ PJ_DEF(void) pjsua_dump(pj_bool_t detail)
     if (detail)
 	pj_dump_config();
 
-    pjsip_endpt_dump(pjsua_get_pjsip_endpt(), detail);
+    pjsip_endpt_dump(pjsua_get_pjsip_endpt(inst_id), detail);
 
-    pjmedia_endpt_dump(pjsua_get_pjmedia_endpt());
+    pjmedia_endpt_dump(pjsua_get_pjmedia_endpt(inst_id));
 
     PJ_LOG(3,(THIS_FILE, "Dumping media transports:"));
-    for (i=0; i<pjsua_var.ua_cfg.max_calls; ++i) {
-	pjsua_call *call = &pjsua_var.calls[i];
+    for (i=0; i<pjsua_var[inst_id].ua_cfg.max_calls; ++i) {
+	pjsua_call *call = &pjsua_var[inst_id].calls[i];
 	pjmedia_transport_info tpinfo;
 	char addr_buf[80];
 
@@ -2618,13 +2918,13 @@ PJ_DEF(void) pjsua_dump(pj_bool_t detail)
 	pjmedia_transport_get_info(call->med_tp, &tpinfo);
 
 	PJ_LOG(3,(THIS_FILE, " %s: %s",
-		  (pjsua_var.media_cfg.enable_ice ? "ICE" : "UDP"),
+		  (pjsua_var[inst_id].media_cfg.enable_ice ? "ICE" : "UDP"),
 		  pj_sockaddr_print(&tpinfo.sock_info.rtp_addr_name, addr_buf,
 				    sizeof(addr_buf), 3)));
     }
 
-    pjsip_tsx_layer_dump(detail);
-    pjsip_ua_dump(detail);
+    pjsip_tsx_layer_dump(inst_id, detail);
+    pjsip_ua_dump(inst_id, detail);
 
 // Dumping complete call states may require a 'large' buffer 
 // (about 3KB per call session, including RTCP XR).
@@ -2680,7 +2980,7 @@ PJ_DEF(void) pjsua_dump(pj_bool_t detail)
 #endif
 
     /* Dump presence status */
-    pjsua_pres_dump(detail);
+    pjsua_pres_dump(inst_id, detail);
 
     pj_log_set_decor(old_decor);
     PJ_LOG(3,(THIS_FILE, "Dump complete"));

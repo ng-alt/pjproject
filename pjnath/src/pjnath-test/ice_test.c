@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ice_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -101,7 +101,8 @@ static void ice_on_rx_data(pj_ice_strans *ice_st,
 			   unsigned src_addr_len);
 static void ice_on_ice_complete(pj_ice_strans *ice_st, 
 			        pj_ice_strans_op op,
-			        pj_status_t status);
+					pj_status_t status,
+					pj_sockaddr *turn_mapped_addr);
 static void destroy_sess(struct test_sess *sess, unsigned wait_msec);
 
 /* Create ICE stream transport */
@@ -310,7 +311,8 @@ static void ice_on_rx_data(pj_ice_strans *ice_st,
 
 static void ice_on_ice_complete(pj_ice_strans *ice_st, 
 			        pj_ice_strans_op op,
-			        pj_status_t status)
+					pj_status_t status,
+					pj_sockaddr *turn_mapped_addr)
 {
     struct ice_ept *ept;
 

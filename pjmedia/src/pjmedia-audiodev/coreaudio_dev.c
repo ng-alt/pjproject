@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: coreaudio_dev.c 4079 2012-04-24 10:26:07Z ming $ */
 /*
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -39,7 +39,7 @@
 
     /**
      * As in iOS SDK 4 or later, audio route change property listener is
-     * no longer necessary. Just make surethat your application can receive
+     * no longer necessary. Just make surethat yca_factory_initour application can receive
      * remote control events by adding the code:
      *     [[UIApplication sharedApplication] 
      *      beginReceivingRemoteControlEvents];
@@ -175,7 +175,7 @@ static pj_status_t create_audio_unit(AudioComponent io_comp,
 				     struct coreaudio_stream *strm,
 				     AudioUnit *io_unit);
 #if !COREAUDIO_MAC
-static void interruptionListener(void *inClientData, UInt32 inInterruption);
+static void interruptionListener(int inst_id, void *inClientData, UInt32 inInterruption);
 static void propListener(void *                 inClientData,
                          AudioSessionPropertyID inID,
                          UInt32                 inDataSize,
@@ -705,10 +705,10 @@ static OSStatus resample_callback(void                       *inRefCon,
      *   session will leave TLS set, but release the TLS data address,
      *   so the second session must re-register the callback's thread.
      */
-    if (strm->rec_thread_initialized == 0 || !pj_thread_is_registered())
+    if (strm->rec_thread_initialized == 0 || !pj_thread_is_registered(strm->pool->factory->inst_id))
     {
 	pj_bzero(strm->rec_thread_desc, sizeof(pj_thread_desc));
-	status = pj_thread_register("ca_rec", strm->rec_thread_desc,
+	status = pj_thread_register(strm->pool->factory->inst_id, "ca_rec", strm->rec_thread_desc,
 				    &strm->rec_thread);
 	strm->rec_thread_initialized = 1;
 	PJ_LOG(5,(THIS_FILE, "Recorder thread started, (%i frames)", 
@@ -857,10 +857,10 @@ static OSStatus input_callback(void                       *inRefCon,
      *   session will leave TLS set, but release the TLS data address,
      *   so the second session must re-register the callback's thread.
      */
-    if (strm->rec_thread_initialized == 0 || !pj_thread_is_registered())
+    if (strm->rec_thread_initialized == 0 || !pj_thread_is_registered(strm->pool->factory->inst_id))
     {
 	pj_bzero(strm->rec_thread_desc, sizeof(pj_thread_desc));
-	status = pj_thread_register("ca_rec", strm->rec_thread_desc,
+	status = pj_thread_register(strm->pool->factory->inst_id, "ca_rec", strm->rec_thread_desc,
 				    &strm->rec_thread);
 	strm->rec_thread_initialized = 1;
 	PJ_LOG(5,(THIS_FILE, "Recorder thread started, (%i frames)",
@@ -972,10 +972,10 @@ static OSStatus output_renderer(void                       *inRefCon,
      *   session will leave TLS set, but release the TLS data address,
      *   so the second session must re-register the callback's thread.
      */
-    if (stream->play_thread_initialized == 0 || !pj_thread_is_registered())
+    if (stream->play_thread_initialized == 0 || !pj_thread_is_registered(stream->pool->factory->inst_id))
     {
 	pj_bzero(stream->play_thread_desc, sizeof(pj_thread_desc));
-	status = pj_thread_register("coreaudio", stream->play_thread_desc,
+	status = pj_thread_register(stream->pool->factory->inst_id, "coreaudio", stream->play_thread_desc,
 				    &stream->play_thread);
 	stream->play_thread_initialized = 1;
 	PJ_LOG(5,(THIS_FILE, "Player thread started, (%i frames)",
@@ -1107,7 +1107,7 @@ static void propListener(void 			*inClientData,
     pj_mutex_unlock(cf->mutex);
 }
 
-static void interruptionListener(void *inClientData, UInt32 inInterruption)
+static void interruptionListener(int inst_id, void *inClientData, UInt32 inInterruption)
 {
     struct stream_list *it, *itBegin;
     pj_status_t status;
@@ -1117,9 +1117,9 @@ static void interruptionListener(void *inClientData, UInt32 inInterruption)
     /* Register the thread with PJLIB, this is must for any external threads
      * which need to use the PJLIB framework.
      */
-    if (!pj_thread_is_registered()) {
+    if (!pj_thread_is_registered(inst_id)) {
 	pj_bzero(thread_desc, sizeof(pj_thread_desc));
-	status = pj_thread_register("intListener", thread_desc, &thread);
+	status = pj_thread_register(inst_id, "intListener", thread_desc, &thread);
     }
     
     PJ_LOG(3, (THIS_FILE, "Session interrupted! --- %s ---",
@@ -1964,6 +1964,11 @@ static pj_status_t ca_stream_set_cap(pjmedia_aud_stream *s,
 	strm->cf->io_comp = io_comp;
 	strm->param.ec_enabled = *(pj_bool_t*)pval;
 
+        PJ_LOG(4, (THIS_FILE, "Using %s audio unit", 
+                              (desc.componentSubType ==
+                               kAudioUnitSubType_RemoteIO? "RemoteIO":
+                               "VoiceProcessingIO")));
+        
 	return PJ_SUCCESS;
     }
 #endif

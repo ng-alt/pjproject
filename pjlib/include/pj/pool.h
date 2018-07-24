@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pool.h 4395 2013-02-27 12:07:30Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -509,7 +509,7 @@ PJ_INLINE(void*) pj_pool_zalloc(pj_pool_t *pool, pj_size_t size)
  * Internal functions
  */
 PJ_IDECL(void*) pj_pool_alloc_from_block(pj_pool_block *block, pj_size_t size);
-PJ_DECL(void*) pj_pool_allocate_find(pj_pool_t *pool, unsigned size);
+PJ_DECL(void*) pj_pool_allocate_find(pj_pool_t *pool, pj_size_t size);
 
 
 	
@@ -723,7 +723,9 @@ struct pj_pool_factory
      * @param factory	    The pool factory.
      * @param size	    Size freed.
      */
-    void (*on_block_free)(pj_pool_factory *factory, pj_size_t size);
+	void (*on_block_free)(pj_pool_factory *factory, pj_size_t size);
+
+	int inst_id;
 
 };
 
@@ -861,7 +863,14 @@ struct pj_caching_pool
     /**
      * Mutex.
      */
-    pj_lock_t	   *lock;
+	pj_lock_t	   *lock;
+
+	// DEAN, isntance id of pjsua
+	int inst_id;
+
+	// DEAN, if don't add this there are some strange problem.
+	// So this is tricky.
+	char reserved[36];
 };
 
 
@@ -869,6 +878,7 @@ struct pj_caching_pool
 /**
  * Initialize caching pool.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param ch_pool	The caching pool factory to be initialized.
  * @param policy	Pool factory policy.
  * @param max_capacity	The total capacity to be retained in the cache. When
@@ -877,7 +887,7 @@ struct pj_caching_pool
  *			list plus the capacity of the pool is still below this
  *			value.
  */
-PJ_DECL(void) pj_caching_pool_init( pj_caching_pool *ch_pool, 
+PJ_DECL(void) pj_caching_pool_init( int inst_id, pj_caching_pool *ch_pool, 
 				    const pj_pool_factory_policy *policy,
 				    pj_size_t max_capacity);
 
@@ -892,6 +902,10 @@ PJ_DECL(void) pj_caching_pool_destroy( pj_caching_pool *ch_pool );
 /**
  * @}	// PJ_CACHING_POOL
  */
+
+PJ_DECL(void *) pj_mem_alloc( pj_size_t size);
+
+PJ_DECL(void) pj_mem_free( void *buf, pj_size_t size);
 
 #  if PJ_FUNCTIONS_ARE_INLINED
 #    include "pool_i.h"

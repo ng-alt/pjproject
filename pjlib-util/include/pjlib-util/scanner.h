@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: scanner.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -199,6 +199,7 @@ typedef struct pj_scanner
     int   line;         /**< Current line.		*/
     char *start_line;   /**< Where current line starts.	*/
     int   skip_ws;      /**< Skip whitespace flag.	*/
+	int   inst_id;
     pj_syn_err_func_ptr callback;   /**< Syntax error callback. */
 } pj_scanner;
 
@@ -231,7 +232,8 @@ typedef struct pj_scan_state
  * @param callback  Callback to be called when the scanner encounters syntax
  *		    error condition.
  */
-PJ_DECL(void) pj_scan_init( pj_scanner *scanner, char *bufstart, int buflen, 
+PJ_DECL(void) pj_scan_init( int inst_id, 
+				pj_scanner *scanner, char *bufstart, int buflen, 
 			    unsigned options,
 			    pj_syn_err_func_ptr callback );
 

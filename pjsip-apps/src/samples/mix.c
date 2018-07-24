@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: mix.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -155,10 +155,11 @@ int main(int argc, char *argv[])
     }
 
     /* Initialialize */
-    CHECK( pj_init() );
+    CHECK( pj_init(0) );
     CHECK( pjlib_util_init() );
-    pj_caching_pool_init(&cp, NULL, 0);
-    CHECK( pjmedia_endpt_create(&cp.factory, NULL, 1, &med_ept) );
+    pj_caching_pool_init(0, &cp, NULL, 0);
+    //CHECK( pjmedia_endpt_create(&cp.factory, NULL, 1, &med_ept) );
+    CHECK( pjmedia_endpt_create(0, &cp.factory, NULL, 1, 0,&med_ept) );
 
     pool = pj_pool_create(&cp.factory, "mix", 1000, 1000, NULL);
 
@@ -230,7 +231,7 @@ int main(int argc, char *argv[])
 
     pj_pool_release(pool);
     pj_caching_pool_destroy(&cp);
-    pj_shutdown();
+    pj_shutdown(0);
 
     return 0;
 }

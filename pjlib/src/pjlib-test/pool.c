@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pool.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -138,7 +138,7 @@ static int pool_buf_alignment_test(void)
 
     PJ_LOG(3,("test", "...pool_buf alignment test"));
 
-    pool = pj_pool_create_on_buf(NULL, buf, sizeof(buf));
+    pool = pj_pool_create_on_buf(0, NULL, buf, sizeof(buf));
     if (!pool)
 	return -400;
 
@@ -242,12 +242,12 @@ static int pool_buf_test(void)
 
     PJ_LOG(3,("test", "...pool_buf test"));
 
-    pool = pj_pool_create_on_buf("no name", buf, sizeof(buf));
+    pool = pj_pool_create_on_buf(0, "no name", buf, sizeof(buf));
     if (!pool)
 	return -70;
 
     /* Drain the pool */
-    PJ_TRY {
+    PJ_TRY(0) {
 	if ((p=pj_pool_alloc(pool, STATIC_BUF_SIZE/2)) == NULL)
 	    return -75;
 
@@ -257,10 +257,10 @@ static int pool_buf_test(void)
     PJ_CATCH_ANY {
 	return -77;
     }
-    PJ_END;
+    PJ_END(0);
 
     /* On the next alloc, exception should be thrown */
-    PJ_TRY {
+    PJ_TRY(0) {
 	p = pj_pool_alloc(pool, STATIC_BUF_SIZE);
 	if (p != NULL) {
 	    /* This is unexpected, the alloc should fail */
@@ -270,7 +270,7 @@ static int pool_buf_test(void)
     PJ_CATCH_ANY {
 	/* This is the expected result */
     }
-    PJ_END;
+    PJ_END(0);
 
     /* Done */
     return 0;

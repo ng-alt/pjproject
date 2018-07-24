@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: log.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -102,10 +102,16 @@ enum pj_log_decoration
    \endverbatim
  * @hideinitializer
  */
+#if 1 //INST_TODO
 #define PJ_LOG(level,arg)	do { \
-				    if (level <= pj_log_get_level()) \
+				    if (level <= pj_log_get_level(0)) \
 					pj_log_wrapper_##level(arg); \
 				} while (0)
+#else
+#include <j_log.h>
+#define PJ_LOG(level, ... ) __android_log_print(ANDROID_LOG_ERROR,"",__VA_ARGS__);            
+#endif
+
 
 /**
  * Signature for function to be registered to the logging subsystem to
@@ -115,7 +121,7 @@ enum pj_log_decoration
  * @param data	    Log message, which will be NULL terminated.
  * @param len	    Message length.
  */
-typedef void pj_log_func(int level, const char *data, int len);
+typedef void pj_log_func(int inst_id, int level, const char *data, int len, int flush);
 
 /**
  * Default logging writer function used by front end logger function.
@@ -127,7 +133,7 @@ typedef void pj_log_func(int level, const char *data, int len);
  * @param buffer    Log message.
  * @param len	    Message length.
  */
-PJ_DECL(void) pj_log_write(int level, const char *buffer, int len);
+PJ_DECL(void) pj_log_write(int inst_id, int level, const char *buffer, int len, int flush);
 
 
 #if PJ_LOG_MAX_LEVEL >= 1
@@ -142,6 +148,18 @@ PJ_DECL(void) pj_log_write(int level, const char *buffer, int len);
  */
 PJ_DECL(void) pj_log(const char *sender, int level, 
 		     const char *format, va_list marker);
+
+/**
+ * Write to log.
+ *
+ * @param sender    Source of the message.
+ * @param level	    Verbosity level.
+ * @param format    Format.
+ * @param marker    Marker.
+ * @param marker    Marker.
+ */
+PJ_DECL(void) pj_log2(const char *sender, int level, 
+		     const char *format, va_list marker, int flush);
 
 /**
  * Change log output function. The front-end logging functions will call
@@ -168,21 +186,23 @@ PJ_DECL(pj_log_func*) pj_log_get_log_func(void);
  * the maximum level of verbosity can not exceed compile time value of
  * PJ_LOG_MAX_LEVEL.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param level	    The maximum level of verbosity of the logging
  *		    messages (6=very detailed..1=error only, 0=disabled)
  */
-PJ_DECL(void) pj_log_set_level(int level);
+PJ_DECL(void) pj_log_set_level(int inst_id, int level);
 
 /**
  * Get current maximum log verbositylevel.
  *
+ * @param inst_id   The instance id of pjsua.
  * @return	    Current log maximum level.
  */
 #if 1
-PJ_DECL(int) pj_log_get_level(void);
+PJ_DECL(int) pj_log_get_level(int inst_id);
 #else
 PJ_DECL_DATA(int) pj_log_max_level;
-#define pj_log_get_level()  pj_log_max_level
+#define pj_log_get_level(int inst_id)  pj_log_max_level
 #endif
 
 /**
@@ -223,7 +243,7 @@ PJ_DECL(pj_color_t) pj_log_get_color(int level);
 /**
  * Internal function to be called by pj_init()
  */
-pj_status_t pj_log_init(void);
+pj_status_t pj_log_init(int inst_id);
 
 #else	/* #if PJ_LOG_MAX_LEVEL >= 1 */
 

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: xpidf.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -117,12 +117,12 @@ PJ_DEF(pjxpidf_pres*) pjxpidf_create(pj_pool_t *pool, const pj_str_t *uri_cstr)
 
 
 
-PJ_DEF(pjxpidf_pres*) pjxpidf_parse(pj_pool_t *pool, char *text, pj_size_t len)
+PJ_DEF(pjxpidf_pres*) pjxpidf_parse(int inst_id, pj_pool_t *pool, char *text, pj_size_t len)
 {
     pjxpidf_pres *pres;
     pj_xml_node *node;
 
-    pres = pj_xml_parse(pool, text, len);
+    pres = pj_xml_parse(inst_id, pool, text, len);
     if (!pres)
 	return NULL;
 

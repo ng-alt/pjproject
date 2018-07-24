@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ssl_sock.h 4376 2013-02-27 09:41:37Z nanang $ */
 /* 
  * Copyright (C) 2009-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -332,13 +332,35 @@ PJ_DECL(pj_status_t) pj_ssl_cipher_get_availables(pj_ssl_cipher ciphers[],
 
 
 /**
+ * Check if the specified cipher is supported by SSL/TLS backend.
+ *
+ * @param cipher	The cipher.
+ *
+ * @return		PJ_TRUE when supported.
+ */
+PJ_DECL(pj_bool_t) pj_ssl_cipher_is_supported(pj_ssl_cipher cipher);
+
+
+/**
  * Get cipher name string.
  *
  * @param cipher	The cipher.
  *
- * @return		The cipher name or NULL if cipher is not recognized.
+ * @return		The cipher name or NULL if cipher is not recognized/
+ *			supported.
  */
 PJ_DECL(const char*) pj_ssl_cipher_name(pj_ssl_cipher cipher);
+
+
+/**
+ * Get cipher ID from cipher name string.
+ *
+ * @param cipher_name	The cipher name string.
+ *
+ * @return		The cipher ID or PJ_TLS_UNKNOWN_CIPHER if the cipher
+ *			name string is not recognized/supported.
+ */
+PJ_DECL(pj_ssl_cipher) pj_ssl_cipher_id(const char *cipher_name);
 
 
 /**
@@ -519,6 +541,11 @@ typedef struct pj_ssl_sock_info
      * Status of peer certificate verification.
      */
     pj_uint32_t		verify_status;
+
+    /**
+     * Last native error returned by the backend.
+     */
+    unsigned long	last_native_err;
 
 } pj_ssl_sock_info;
 
@@ -709,8 +736,153 @@ typedef struct pj_ssl_sock_param
      */
     pj_bool_t qos_ignore_error;
 
+    /**
+     * Specify the TCP socket timeout value. in second.
+     *
+     * Default: 90
+     */
+	int tcp_timeout;
+
 
 } pj_ssl_sock_param;
+
+/**
+ * Dean added.
+ * TLS config.
+ */
+typedef struct pj_ssl_sock_cfg
+{
+    /**
+     * Certificate of Authority (CA) list file.
+     */
+    pj_str_t	ca_list_file;
+
+    /**
+     * Public endpoint certificate file, which will be used as client-
+     * side  certificate for outgoing TLS connection, and server-side
+     * certificate for incoming TLS connection.
+     */
+    pj_str_t	cert_file;
+
+    /**
+     * Optional private key of the endpoint certificate to be used.
+     */
+    pj_str_t	privkey_file;
+
+    /**
+     * Password to open private key.
+     */
+    pj_str_t	password;
+
+    /**
+     * TLS protocol method from #pjsip_ssl_method, which can be:
+     *	- PJSIP_SSL_UNSPECIFIED_METHOD(0): default (which will use 
+     *                                     PJSIP_SSL_DEFAULT_METHOD)
+     *	- PJSIP_TLSV1_METHOD(1):	   TLSv1
+     *	- PJSIP_SSLV2_METHOD(2):	   SSLv2
+     *	- PJSIP_SSLV3_METHOD(3):	   SSL3
+     *	- PJSIP_SSLV23_METHOD(23):	   SSL23
+     *
+     * Default is PJSIP_SSL_UNSPECIFIED_METHOD (0), which in turn will
+     * use PJSIP_SSL_DEFAULT_METHOD, which default value is 
+     * PJSIP_TLSV1_METHOD.
+     */
+    int		method;
+
+    /**
+     * Number of ciphers contained in the specified cipher preference. 
+     * If this is set to zero, then default cipher list of the backend 
+     * will be used.
+     *
+     * Default: 0 (zero).
+     */
+    unsigned ciphers_num;
+
+    /**
+     * Ciphers and order preference. The #pj_ssl_cipher_get_availables()
+     * can be used to check the available ciphers supported by backend.
+     */
+    pj_ssl_cipher *ciphers;
+
+    /**
+     * Specifies TLS transport behavior on the server TLS certificate 
+     * verification result:
+     * - If \a verify_server is disabled (set to PJ_FALSE), TLS transport 
+     *   will just notify the application via #pjsip_tp_state_callback with
+     *   state PJSIP_TP_STATE_CONNECTED regardless TLS verification result.
+     * - If \a verify_server is enabled (set to PJ_TRUE), TLS transport 
+     *   will be shutdown and application will be notified with state
+     *   PJSIP_TP_STATE_DISCONNECTED whenever there is any TLS verification
+     *   error, otherwise PJSIP_TP_STATE_CONNECTED will be notified.
+     *
+     * In any cases, application can inspect #pjsip_tls_state_info in the
+     * callback to see the verification detail.
+     *
+     * Default value is PJ_FALSE.
+     */
+    pj_bool_t	verify_server;
+
+    /**
+     * Specifies TLS transport behavior on the client TLS certificate 
+     * verification result:
+     * - If \a verify_client is disabled (set to PJ_FALSE), TLS transport 
+     *   will just notify the application via #pjsip_tp_state_callback with
+     *   state PJSIP_TP_STATE_CONNECTED regardless TLS verification result.
+     * - If \a verify_client is enabled (set to PJ_TRUE), TLS transport 
+     *   will be shutdown and application will be notified with state
+     *   PJSIP_TP_STATE_DISCONNECTED whenever there is any TLS verification
+     *   error, otherwise PJSIP_TP_STATE_CONNECTED will be notified.
+     *
+     * In any cases, application can inspect #pjsip_tls_state_info in the
+     * callback to see the verification detail.
+     *
+     * Default value is PJ_FALSE.
+     */
+    pj_bool_t	verify_client;
+
+    /**
+     * When acting as server (incoming TLS connections), reject inocming
+     * connection if client doesn't supply a TLS certificate.
+     *
+     * This setting corresponds to SSL_VERIFY_FAIL_IF_NO_PEER_CERT flag.
+     * Default value is PJ_FALSE.
+     */
+    pj_bool_t	require_client_cert;
+
+    /**
+     * TLS negotiation timeout to be applied for both outgoing and
+     * incoming connection. If both sec and msec member is set to zero,
+     * the SSL negotiation doesn't have a timeout.
+     */
+    pj_time_val	timeout;
+
+    /**
+     * QoS traffic type to be set on this transport. When application wants
+     * to apply QoS tagging to the transport, it's preferable to set this
+     * field rather than \a qos_param fields since this is more portable.
+     *
+     * Default value is PJ_QOS_TYPE_BEST_EFFORT.
+     */
+    pj_qos_type qos_type;
+
+    /**
+     * Set the low level QoS parameters to the transport. This is a lower
+     * level operation than setting the \a qos_type field and may not be
+     * supported on all platforms.
+     *
+     * By default all settings in this structure are disabled.
+     */
+    pj_qos_params qos_params;
+
+    /**
+     * Specify if the transport should ignore any errors when setting the QoS
+     * traffic type/parameters.
+     *
+     * Default: PJ_TRUE
+     */
+    pj_bool_t qos_ignore_error;
+
+} pj_ssl_sock_cfg;
 
 
 /**

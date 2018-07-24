@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: transport_ice.c 4384 2013-02-27 10:08:07Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -79,7 +79,7 @@ struct transport_ice
 
     void	       (*rtp_cb)(void*,
 			         void*,
-				 pj_ssize_t);
+				  pj_ssize_t);
     void	       (*rtcp_cb)(void*,
 				  void*,
 				  pj_ssize_t);
@@ -101,7 +101,7 @@ static pj_status_t transport_attach   (pjmedia_transport *tp,
 						      pj_ssize_t),
 				       void (*rtcp_cb)(void*,
 						       void*,
-						       pj_ssize_t));
+							   pj_ssize_t));
 static void	   transport_detach   (pjmedia_transport *tp,
 				       void *strm);
 static pj_status_t transport_send_rtp( pjmedia_transport *tp,
@@ -146,8 +146,19 @@ static void ice_on_rx_data(pj_ice_strans *ice_st,
 			   unsigned src_addr_len);
 static void ice_on_ice_complete(pj_ice_strans *ice_st, 
 				pj_ice_strans_op op,
-			        pj_status_t status);
+				pj_status_t status,
+				pj_sockaddr *turn_mapped_addr);
 
+static void ice_on_turn_allocated(pj_ice_strans *ice_st, 
+								  pj_sockaddr_t *turn_srv);
+
+static pj_status_t ice_on_stun_binding_complete(pj_ice_strans *ice_st,
+										 pj_sockaddr *local_addr, 
+										 int ip_chagned_type);
+
+static pj_status_t ice_on_tcp_server_binding_complete(pj_ice_strans *ice_st,
+											 pj_sockaddr *external_addr,
+											 pj_sockaddr *local_addr);
 
 static pjmedia_transport_op transport_ice_op = 
 {
@@ -177,6 +188,8 @@ static const pj_str_t STR_IP6		= { "IP6", 3 };
 static const pj_str_t STR_RTCP		= { "rtcp", 4 };
 static const pj_str_t STR_BANDW_RR	= { "RR", 2 };
 static const pj_str_t STR_BANDW_RS	= { "RS", 2 };
+static const pj_str_t STR_X_ADAPTER3	= { "X-adapter3", 10};
+static const pj_str_t STR_FINGERPRINT	= { "fingerprint", 11 };
 
 enum {
     COMP_RTP = 1,
@@ -190,10 +203,12 @@ PJ_DEF(pj_status_t) pjmedia_ice_create(pjmedia_endpt *endpt,
 				       const char *name,
 				       unsigned comp_cnt,
 				       const pj_ice_strans_cfg *cfg,
-				       const pjmedia_ice_cb *cb,
+					   const pjmedia_ice_cb *cb,
+					   int tp_idx,
+					   pj_time_val inv_recv_time,
 	    			       pjmedia_transport **p_tp)
 {
-    return pjmedia_ice_create2(endpt, name, comp_cnt, cfg, cb, 0, p_tp);
+    return pjmedia_ice_create2(endpt, name, comp_cnt, cfg, cb, 0, tp_idx, inv_recv_time, p_tp);
 }
 
 /*
@@ -204,7 +219,9 @@ PJ_DEF(pj_status_t) pjmedia_ice_create2(pjmedia_endpt *endpt,
 				        unsigned comp_cnt,
 				        const pj_ice_strans_cfg *cfg,
 				        const pjmedia_ice_cb *cb,
-					unsigned options,
+						unsigned options,
+						int tp_idx,
+						pj_time_val inv_recv_time,
 	    			        pjmedia_transport **p_tp)
 {
     pj_pool_t *pool;
@@ -221,9 +238,13 @@ PJ_DEF(pj_status_t) pjmedia_ice_create2(pjmedia_endpt *endpt,
     tp_ice->af = cfg->af;
     tp_ice->options = options;
     tp_ice->comp_cnt = comp_cnt;
-    pj_ansi_strcpy(tp_ice->base.name, pool->obj_name);
+    pj_ansi_strncpy(tp_ice->base.name, pool->obj_name, PJ_MAX_OBJ_NAME);
+	pj_memset(&tp_ice->base, 0, sizeof(pjmedia_transport)); // DEAN
     tp_ice->base.op = &transport_ice_op;
-    tp_ice->base.type = PJMEDIA_TRANSPORT_TYPE_ICE;
+	tp_ice->base.type = PJMEDIA_TRANSPORT_TYPE_ICE;
+	tp_ice->base.inst_id = pjmedia_endpt_get_inst_id(endpt);
+	tp_ice->base.inv_recv_time = inv_recv_time;
+
     tp_ice->initial_sdp = PJ_TRUE;
     tp_ice->oa_role = ROLE_NONE;
     tp_ice->use_ice = PJ_FALSE;
@@ -240,10 +261,16 @@ PJ_DEF(pj_status_t) pjmedia_ice_create2(pjmedia_endpt *endpt,
     pj_bzero(&ice_st_cb, sizeof(ice_st_cb));
     ice_st_cb.on_ice_complete = &ice_on_ice_complete;
     ice_st_cb.on_rx_data = &ice_on_rx_data;
+	// DEAN Added 2013-03-19
+	ice_st_cb.on_turn_srv_allocated = &ice_on_turn_allocated;
+	// 2013-05-20 DEAN
+	ice_st_cb.on_stun_binding_complete = &ice_on_stun_binding_complete;
+	// 2014-01-12 DEAN
+	ice_st_cb.on_server_created = &ice_on_tcp_server_binding_complete;
 
     /* Create ICE */
-    status = pj_ice_strans_create(name, cfg, comp_cnt, tp_ice, 
-				  &ice_st_cb, &tp_ice->ice_st);
+    status = pj_ice_strans_create2(name, cfg, comp_cnt, tp_ice, 
+				  &ice_st_cb, tp_idx, &tp_ice->ice_st);
     if (status != PJ_SUCCESS) {
 	pj_pool_release(pool);
 	*p_tp = NULL;
@@ -268,7 +295,9 @@ static void set_no_ice(struct transport_ice *tp_ice, const char *reason,
 		  "Stopping ICE, reason=%s", reason));
     }
 
-    pj_ice_strans_stop_ice(tp_ice->ice_st);
+    if (tp_ice->ice_st) {
+	pj_ice_strans_stop_ice(tp_ice->ice_st);
+    }
 
     tp_ice->use_ice = PJ_FALSE;
 }
@@ -276,16 +305,22 @@ static void set_no_ice(struct transport_ice *tp_ice, const char *reason,
 
 /* Create SDP candidate attribute */
 static int print_sdp_cand_attr(char *buffer, int max_len,
-			       const pj_ice_sess_cand *cand)
+			       const pj_ice_sess_cand *cand, int use_sctp)
 {
     char ipaddr[PJ_INET6_ADDRSTRLEN+2];
-    int len, len2;
+    int len, len2, len3, len4, len5;
+	char *trans_type = "UDP";
+	pj_parsed_time adding_ptime, ending_ptime;
+
+	if (cand->transport_id == 3)    // TP_UPNP_TCP
+		trans_type = "TCP";
 
     len = pj_ansi_snprintf( buffer, max_len,
-			    "%.*s %u UDP %u %s %u typ ",
+			    "%.*s %u %s %u %s %u typ ",
 			    (int)cand->foundation.slen,
 			    cand->foundation.ptr,
 			    (unsigned)cand->comp_id,
+				trans_type,
 			    cand->prio,
 			    pj_sockaddr_print(&cand->addr, ipaddr, 
 					      sizeof(ipaddr), 0),
@@ -293,13 +328,16 @@ static int print_sdp_cand_attr(char *buffer, int max_len,
     if (len < 1 || len >= max_len)
 	return -1;
 
-    switch (cand->type) {
-    case PJ_ICE_CAND_TYPE_HOST:
+	switch (cand->type) {
+	case PJ_ICE_CAND_TYPE_HOST:
+	case PJ_ICE_CAND_TYPE_HOST_TCP:
 	len2 = pj_ansi_snprintf(buffer+len, max_len-len, "host");
 	break;
     case PJ_ICE_CAND_TYPE_SRFLX:
     case PJ_ICE_CAND_TYPE_RELAYED:
-    case PJ_ICE_CAND_TYPE_PRFLX:
+	case PJ_ICE_CAND_TYPE_RELAYED_TCP:
+	case PJ_ICE_CAND_TYPE_PRFLX:
+	case PJ_ICE_CAND_TYPE_SRFLX_TCP:
 	len2 = pj_ansi_snprintf(buffer+len, max_len-len,
 			        "%s raddr %s rport %d",
 				pj_ice_get_cand_type_name(cand->type),
@@ -315,7 +353,55 @@ static int print_sdp_cand_attr(char *buffer, int max_len,
     if (len2 < 1 || len2 >= max_len)
 	return -1;
 
-    return len+len2;
+	len3 = 0;
+	// tcptype
+	if (cand->tcp_type > PJ_ICE_CAND_TCP_TYPE_NONE) {
+		char *tcptype = "";
+		switch(cand->tcp_type) {
+			case PJ_ICE_CAND_TCP_TYPE_ACTIVE:
+				tcptype = "active";
+				break;
+			case PJ_ICE_CAND_TCP_TYPE_PASSIVE:
+				tcptype = "passive";
+				break;
+			case PJ_ICE_CAND_TCP_TYPE_SO:
+				tcptype = "so";
+				break;
+		}
+	len3 = pj_ansi_snprintf(buffer+len+len2, max_len-len-len2,
+			        " tcptype %s",
+				tcptype);
+
+    if (len3 < 1 || len3 >= max_len)
+	return -1;
+	}
+
+	// DEAN. Don't create generation tag on UAC for compatibility.
+	// WebRTC generation
+	/*if (use_sctp)
+		len4 = pj_ansi_snprintf(buffer+len+len2+len3, max_len-len-len2-len3, " generation 0");
+	else*/
+		len4 = 0;
+
+	len5 = 0;
+	// timestamp
+	pj_time_decode(&cand->adding_time, &adding_ptime);
+	pj_time_decode(&cand->ending_time, &ending_ptime);
+	if (cand->transport_id == 4) 
+		len5 = pj_ansi_snprintf(buffer+len+len2+len3+len4, max_len-len-len2-len3-len4,
+			" TCP %s START:%04d-%02d-%02d_%02d:%02d:%02d.%03d END:%04d-%02d-%02d_%02d:%02d:%02d.%03d",
+			cand->enabled ? "Enabled" : "Disabled",
+			adding_ptime.year, adding_ptime.mon+1, adding_ptime.day, adding_ptime.hour, adding_ptime.min, adding_ptime.sec, adding_ptime.msec,
+			ending_ptime.year, ending_ptime.mon+1, ending_ptime.day, ending_ptime.hour, ending_ptime.min, ending_ptime.sec, ending_ptime.msec);
+	else
+		len5 = pj_ansi_snprintf(buffer+len+len2+len3+len4, max_len-len-len2-len3-len4,
+		" %s START:%04d-%02d-%02d_%02d:%02d:%02d.%03d END:%04d-%02d-%02d_%02d:%02d:%02d.%03d",
+		cand->enabled ? "Enabled" : "Disabled",
+		adding_ptime.year, adding_ptime.mon+1, adding_ptime.day, adding_ptime.hour, adding_ptime.min, adding_ptime.sec, adding_ptime.msec,
+		ending_ptime.year, ending_ptime.mon+1, ending_ptime.day, ending_ptime.hour, ending_ptime.min, ending_ptime.sec, ending_ptime.msec);
+
+
+    return len+len2+len3+len4+len5;
 }
 
 
@@ -349,6 +435,101 @@ static void get_ice_attr(const pjmedia_sdp_session *rem_sdp,
 }
 
 
+/* Parse "HOST:PORT" format */
+static pj_status_t parse_host_port(const pj_str_t *host_port,
+								   pj_str_t *host, pj_uint16_t *port)
+{
+	pj_str_t str_port;
+
+	str_port.ptr = pj_strchr(host_port, ':');
+	if (str_port.ptr != NULL) {
+		int iport;
+
+		host->ptr = host_port->ptr;
+		host->slen = (str_port.ptr - host->ptr);
+		str_port.ptr++;
+		str_port.slen = host_port->slen - host->slen - 1;
+		iport = (int)pj_strtoul(&str_port);
+		if (iport < 1 || iport > 65535)
+			return PJ_EINVAL;
+		*port = (pj_uint16_t)iport;
+	} else {
+		*host = *host_port;
+		*port = 0;
+	}
+
+	return PJ_SUCCESS;
+}
+
+/* Parse "HOST:PORT" format */
+static pj_status_t parse_user_realm(const pj_str_t *user_realm,
+								   pj_str_t *user, pj_str_t *realm)
+{
+	pj_str_t str_realm;
+
+	str_realm.ptr = pj_strchr(user_realm, '@');
+	if (str_realm.ptr != NULL) {
+		user->ptr = user_realm->ptr;
+		user->slen = (str_realm.ptr - user->ptr);
+		str_realm.ptr++;
+		str_realm.slen = user_realm->slen - user->slen - 1;
+		*realm = str_realm;
+	} else {
+		*user = *user_realm;
+		*realm = pj_str("");
+	}
+
+	return PJ_SUCCESS;
+}
+
+/* Get ice-ufrag and ice-pwd attribute */
+static void retrieve_remote_turn_attr(struct transport_ice *tp_ice,
+									  const pjmedia_sdp_media *rem_m,
+									  pj_str_t *inv_cid)
+{
+	pjmedia_sdp_attr *attr, *use_turn_flag;
+	pj_uint16_t port = 3479;
+	pj_str_t server = pj_str(""), realm = pj_str(""), 
+		username = pj_str(""), password = pj_str("");
+	pj_str_t local_device_id;
+	char tmp[60];
+
+	// turn username and realm
+	if (tp_ice) {
+		local_device_id = pj_str(tp_ice->base.local_deviceid);
+		parse_user_realm(&local_device_id, &password, &realm);
+	}
+
+	// turn server
+	attr = pjmedia_sdp_attr_find2(rem_m->attr_count, 
+		rem_m->attr, "X-adapter3", NULL);
+	if (attr != NULL) {
+		parse_host_port(&attr->value, &server, &port);
+		if (port == 0)
+			port = 3479;
+	}
+
+	// turn password
+	if (inv_cid && inv_cid->slen > 0)
+	{
+		memset(tmp, 0, sizeof(tmp));
+		sprintf(tmp, "z.%.*s", inv_cid->slen, inv_cid->ptr);
+		pj_strdup2(tp_ice->pool, &username, tmp);
+	}
+
+	// use turn flag
+	use_turn_flag = pjmedia_sdp_attr_find2(rem_m->attr_count, 
+		rem_m->attr, "X-adapter5", NULL);
+	if (use_turn_flag) {
+		tp_ice->base.use_turn_flag = atoi(use_turn_flag->value.ptr);
+		pj_ice_strans_set_use_turn_flag(tp_ice->ice_st, tp_ice->base.use_turn_flag);
+	}
+
+	pj_ice_strans_set_remote_turn_cfg(tp_ice->ice_st, server, port,
+		realm, username, password);
+}
+
+
 /* Encode and add "a=ice-mismatch" attribute in the SDP */
 static void encode_ice_mismatch(pj_pool_t *sdp_pool,
 				pjmedia_sdp_session *sdp_local,
@@ -373,8 +554,8 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
 					 pj_bool_t restart_session)
 {
     enum { 
-	ATTR_BUF_LEN = 160,	/* Max len of a=candidate attr */
-	RATTR_BUF_LEN= 160	/* Max len of a=remote-candidates attr */
+	ATTR_BUF_LEN = 200,	/* Max len of a=candidate attr */
+	RATTR_BUF_LEN= 200	/* Max len of a=remote-candidates attr */
     };
     pjmedia_sdp_media *m = sdp_local->media[media_index];
     pj_str_t local_ufrag, local_pwd;
@@ -402,7 +583,9 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
      * the session, in this case we will answer with full ICE SDP and
      * new ufrag/pwd pair.
      */
-    if (!restart_session && pj_ice_strans_sess_is_complete(tp_ice->ice_st)) {
+    if (!restart_session && pj_ice_strans_sess_is_complete(tp_ice->ice_st) &&
+	pj_ice_strans_get_state(tp_ice->ice_st) != PJ_ICE_STRANS_STATE_FAILED)
+    {
 	const pj_ice_sess_check *check;
 	char *attr_buf;
 	pjmedia_sdp_conn *conn;
@@ -480,7 +663,7 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
 	    /* Print and add local candidate in the pair */
 	    value.ptr = attr_buf;
 	    value.slen = print_sdp_cand_attr(attr_buf, ATTR_BUF_LEN, 
-					     check->lcand);
+					     check->lcand, tp_ice->base.use_sctp);
 	    if (value.slen < 0) {
 		pj_assert(!"Not enough attr_buf to print candidate");
 		return PJ_EBUG;
@@ -532,7 +715,10 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
 	    pjmedia_sdp_attr_add(&m->attr_count, m->attr, attr);
 	}
 
-    } else if (pj_ice_strans_has_sess(tp_ice->ice_st)) {
+    } else if (pj_ice_strans_has_sess(tp_ice->ice_st) &&
+	       pj_ice_strans_get_state(tp_ice->ice_st) !=
+		        PJ_ICE_STRANS_STATE_FAILED)
+    {
 	/* Encode all candidates to SDP media */
 	char *attr_buf;
 	unsigned comp;
@@ -582,7 +768,7 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
 		pj_str_t value;
 
 		value.slen = print_sdp_cand_attr(attr_buf, ATTR_BUF_LEN, 
-						 &cand[i]);
+						 &cand[i], tp_ice->base.use_sctp);
 		if (value.slen < 0) {
 		    pj_assert(!"Not enough attr_buf to print candidate");
 		    return PJ_EBUG;
@@ -592,6 +778,7 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
 		attr = pjmedia_sdp_attr_create(sdp_pool, 
 					       STR_CANDIDATE.ptr,
 					       &value);
+		PJ_LOG(3, ("transport_ice.c", "encode_session_in_sdp() encode cand = %.*s", value.slen, value.ptr));
 		pjmedia_sdp_attr_add(&m->attr_count, m->attr, attr);
 	    }
 	}
@@ -600,24 +787,27 @@ static pj_status_t encode_session_in_sdp(struct transport_ice *tp_ice,
     }
 
     /* Removing a=rtcp line when there is only one component. */
-    if (comp_cnt == 1) {
-	attr = pjmedia_sdp_attr_find(m->attr_count, m->attr, &STR_RTCP, NULL);
-	if (attr)
-	    pjmedia_sdp_attr_remove(&m->attr_count, m->attr, attr);
-        /* If RTCP is not in use, we MUST send b=RS:0 and b=RR:0. */
-        pj_assert(m->bandw_count + 2 <= PJ_ARRAY_SIZE(m->bandw));
-        if (m->bandw_count + 2 <= PJ_ARRAY_SIZE(m->bandw)) {
-            m->bandw[m->bandw_count] = PJ_POOL_ZALLOC_T(sdp_pool,
-                                                        pjmedia_sdp_bandw);
-            pj_memcpy(&m->bandw[m->bandw_count]->modifier, &STR_BANDW_RS,
-                      sizeof(pj_str_t));
-            m->bandw_count++;
-            m->bandw[m->bandw_count] = PJ_POOL_ZALLOC_T(sdp_pool,
-                                                        pjmedia_sdp_bandw);
-            pj_memcpy(&m->bandw[m->bandw_count]->modifier, &STR_BANDW_RR,
-                      sizeof(pj_str_t));
-            m->bandw_count++;
-        }
+	if (comp_cnt == 1) {
+		const pj_str_t STR_APPLICATION = { "application", 11};
+		attr = pjmedia_sdp_attr_find(m->attr_count, m->attr, &STR_RTCP, NULL);
+		if (attr)
+			pjmedia_sdp_attr_remove(&m->attr_count, m->attr, attr);
+		if (pj_strcmp(&sdp_local->media[media_index]->desc.media, &STR_APPLICATION) != 0) {
+			/* If RTCP is not in use, we MUST send b=RS:0 and b=RR:0. */
+			pj_assert(m->bandw_count + 2 <= PJ_ARRAY_SIZE(m->bandw));
+			if (m->bandw_count + 2 <= PJ_ARRAY_SIZE(m->bandw)) {
+				m->bandw[m->bandw_count] = PJ_POOL_ZALLOC_T(sdp_pool,
+															pjmedia_sdp_bandw);
+				pj_memcpy(&m->bandw[m->bandw_count]->modifier, &STR_BANDW_RS,
+						  sizeof(pj_str_t));
+				m->bandw_count++;
+				m->bandw[m->bandw_count] = PJ_POOL_ZALLOC_T(sdp_pool,
+															pjmedia_sdp_bandw);
+				pj_memcpy(&m->bandw[m->bandw_count]->modifier, &STR_BANDW_RR,
+						  sizeof(pj_str_t));
+				m->bandw_count++;
+			}
+		}
     }
     
 
@@ -636,14 +826,15 @@ static pj_status_t parse_cand(const char *obj_name,
     int af;
     pj_str_t s;
     pj_status_t status = PJNATH_EICEINCANDSDP;
+	pj_bool_t tcp = PJ_FALSE;
 
     pj_bzero(cand, sizeof(*cand));
     pj_strdup_with_null(pool, &input, orig_input);
 
-    PJ_UNUSED_ARG(obj_name);
+	PJ_UNUSED_ARG(obj_name);
 
-    /* Foundation */
-    token = strtok(input.ptr, " ");
+	/* Foundation */
+	token = strtok(input.ptr, " ");
     if (!token) {
 	TRACE__((obj_name, "Expecting ICE foundation in candidate"));
 	goto on_return;
@@ -658,17 +849,22 @@ static pj_status_t parse_cand(const char *obj_name,
     }
     cand->comp_id = (pj_uint8_t) atoi(token);
 
-    /* Transport */
+	/* Transport */
+	cand->transport_id = 1; // TP_STUN
     token = strtok(NULL, " ");
     if (!token) {
 	TRACE__((obj_name, "Expecting ICE transport in candidate"));
 	goto on_return;
     }
-    if (pj_ansi_stricmp(token, "UDP") != 0) {
+    if (pj_ansi_stricmp(token, "UDP") != 0 && 
+		pj_ansi_stricmp(token, "TCP") != 0) {
 	TRACE__((obj_name, 
-		 "Expecting ICE UDP transport only in candidate"));
+		 "Expecting ICE TCP and UDP transport in candidate"));
 	goto on_return;
-    }
+	} else if (pj_ansi_stricmp(token, "TCP") == 0) {
+		tcp = PJ_TRUE;
+		cand->transport_id = 3; // TP_UPNP_TCP
+	}
 
     /* Priority */
     token = strtok(NULL, " ");
@@ -721,14 +917,21 @@ static pj_status_t parse_cand(const char *obj_name,
 	goto on_return;
     }
 
-    if (pj_ansi_stricmp(token, "host") == 0) {
-	cand->type = PJ_ICE_CAND_TYPE_HOST;
+	if (pj_ansi_stricmp(token, "host") == 0) {
+		if (!tcp)
+			cand->type = PJ_ICE_CAND_TYPE_HOST;
+		else
+			cand->type = PJ_ICE_CAND_TYPE_HOST_TCP;
 
     } else if (pj_ansi_stricmp(token, "srflx") == 0) {
-	cand->type = PJ_ICE_CAND_TYPE_SRFLX;
+		if (!tcp)
+			cand->type = PJ_ICE_CAND_TYPE_SRFLX;
+		else
+			cand->type = PJ_ICE_CAND_TYPE_SRFLX_TCP;
 
     } else if (pj_ansi_stricmp(token, "relay") == 0) {
-	cand->type = PJ_ICE_CAND_TYPE_RELAYED;
+		cand->type = PJ_ICE_CAND_TYPE_RELAYED;
+		cand->transport_id = 2; // TP_TURN
 
     } else if (pj_ansi_stricmp(token, "prflx") == 0) {
 	cand->type = PJ_ICE_CAND_TYPE_PRFLX;
@@ -738,6 +941,112 @@ static pj_status_t parse_cand(const char *obj_name,
 		  token));
 	goto on_return;
     }
+
+	if (tcp && cand->type != PJ_ICE_CAND_TYPE_RELAYED_TCP) {
+		if (cand->type != PJ_ICE_CAND_TYPE_HOST && 
+			cand->type != PJ_ICE_CAND_TYPE_HOST_TCP) {
+			int i;
+			for (i = 0; i < 4; i++) {
+				token = strtok(NULL, " ");
+				if (!token) {
+				TRACE__((obj_name, "Expecting ICE tcptype in candidate"));
+				goto on_return;
+				}
+			}
+		}
+
+		/* tcp type */
+		token = strtok(NULL, " ");
+		if (!token) {
+		TRACE__((obj_name, "Expecting ICE tcptype in candidate"));
+		goto on_return;
+		}
+		if (pj_ansi_stricmp(token, "tcptype") != 0) {
+		TRACE__((obj_name, "Expecting ICE \"typ\" in candidate"));
+		goto on_return;
+		}
+
+		token = strtok(NULL, " ");
+		if (!token) {
+		TRACE__((obj_name, "Expecting ICE tcp type in candidate"));
+		goto on_return;
+		}
+		if (pj_ansi_stricmp(token, "active") == 0) {
+		cand->tcp_type = PJ_ICE_CAND_TCP_TYPE_ACTIVE;
+
+		} else if (pj_ansi_stricmp(token, "passive") == 0) {
+		cand->tcp_type = PJ_ICE_CAND_TCP_TYPE_PASSIVE;
+
+		} else if (pj_ansi_stricmp(token, "so") == 0) {
+		cand->tcp_type = PJ_ICE_CAND_TCP_TYPE_SO;
+
+		} else {
+		cand->tcp_type = PJ_ICE_CAND_TCP_TYPE_NONE;
+		}
+	}
+
+	if (cand->type == PJ_ICE_CAND_TYPE_RELAYED) {
+		if (token)
+			token = strtok(NULL, " ");
+		if (token)
+			token = strtok(NULL, " ");
+		if (token)
+			token = strtok(NULL, " ");
+		if (token)
+			token = strtok(NULL, " ");
+		if (token)
+			token = strtok(NULL, " ");
+		
+		if (token && pj_ansi_stricmp(token, "generation") == 0) {
+			token = strtok(NULL, " ");
+			if (token)
+				token = strtok(NULL, " ");
+		}
+
+		if (token && pj_ansi_stricmp(token, "TCP") == 0) {
+			cand->type = PJ_ICE_CAND_TYPE_RELAYED_TCP;
+			cand->transport_id = 4; // TP_TURN_TCP
+		} else if (token && pj_ansi_stricmp(token, "Enabled") == 0) {
+			cand->enabled = PJ_TRUE;
+			status = PJ_SUCCESS;
+			goto on_return;
+		} else if (token && pj_ansi_stricmp(token, "Disabled") == 0) {
+			cand->enabled = PJ_FALSE;
+			status = PJ_SUCCESS;
+			goto on_return;
+		} else if (!token) {
+			cand->enabled = PJ_TRUE;
+			status = PJ_SUCCESS;
+			goto on_return;
+		}
+	}
+
+	if (cand->type == PJ_ICE_CAND_TYPE_SRFLX) {
+			if (token)
+				token = strtok(NULL, " ");
+			if (token)
+				token = strtok(NULL, " ");
+			if (token)
+				token = strtok(NULL, " ");
+			if (token)
+				token = strtok(NULL, " ");
+	}
+
+	/* Enabled or Disabled */
+	if (token) {
+		token = strtok(NULL, " ");
+		if (token) {
+			if (pj_ansi_stricmp(token, "Enabled") == 0 ||
+				pj_ansi_stricmp(token, "generation") == 0 ) // dean : generation is for WebRTC data channel.
+				cand->enabled = PJ_TRUE;
+			else
+				cand->enabled = PJ_FALSE;
+		} else {
+			cand->enabled = PJ_TRUE;
+		}
+	} else {
+		cand->enabled = PJ_TRUE;
+	}
 
     status = PJ_SUCCESS;
 
@@ -781,6 +1090,8 @@ static pj_status_t verify_ice_sdp(struct transport_ice *tp_ice,
     pj_sockaddr rem_conn_addr, rtcp_addr;
     unsigned i;
     pj_status_t status;
+
+	int inst_id = tp_ice->base.inst_id;
 
     rem_m = rem_sdp->media[media_index];
 
@@ -833,7 +1144,7 @@ static pj_status_t verify_ice_sdp(struct transport_ice *tp_ice,
 	if (attr) {
 	    pjmedia_sdp_rtcp_attr rtcp_attr;
 
-	    status = pjmedia_sdp_attr_get_rtcp(attr, &rtcp_attr);
+	    status = pjmedia_sdp_attr_get_rtcp(inst_id, attr, &rtcp_attr);
 	    if (status != PJ_SUCCESS) {
 		/* Error parsing a=rtcp attribute */
 		return status;
@@ -869,7 +1180,7 @@ static pj_status_t verify_ice_sdp(struct transport_ice *tp_ice,
 	} else {
 	    unsigned rtcp_port;
     	
-	    rtcp_port = pj_sockaddr_get_port(&rem_conn_addr) + 1;
+		rtcp_port = pj_sockaddr_get_port(&rem_conn_addr) + 1;
 	    pj_sockaddr_cp(&rtcp_addr, &rem_conn_addr);
 	    pj_sockaddr_set_port(&rtcp_addr, (pj_uint16_t)rtcp_port);
 	}
@@ -894,12 +1205,14 @@ static pj_status_t verify_ice_sdp(struct transport_ice *tp_ice,
 	    continue;
 	}
 
-	if (!comp1_found && cand.comp_id==COMP_RTP &&
-	    pj_sockaddr_cmp(&rem_conn_addr, &cand.addr)==0) 
+	if (!comp1_found && cand.comp_id==COMP_RTP && 
+		(pj_ice_strans_tp_is_upnp_tcp(cand.transport_id) || 
+		  pj_sockaddr_cmp(&rem_conn_addr, &cand.addr)==0)) 
 	{
 	    comp1_found = PJ_TRUE;
 	} else if (!comp2_found && cand.comp_id==COMP_RTCP &&
-		    pj_sockaddr_cmp(&rtcp_addr, &cand.addr)==0) 
+		    (pj_ice_strans_tp_is_upnp_tcp(cand.transport_id) || 
+			  pj_sockaddr_cmp(&rtcp_addr, &cand.addr)==0)) 
 	{
 	    comp2_found = PJ_TRUE;
 	}
@@ -1146,7 +1459,31 @@ static pj_status_t transport_media_create(pjmedia_transport *tp,
      * rem_sdp, but it will be checked again later.
      */
     ice_role = (rem_sdp==NULL ? PJ_ICE_SESS_ROLE_CONTROLLING : 
-				PJ_ICE_SESS_ROLE_CONTROLLED);
+		PJ_ICE_SESS_ROLE_CONTROLLED);
+
+	PJ_LOG(4,(tp_ice->base.name, 
+		  "tp_ice=%p, tp_ice->use_upnp_flag=%d, tp_ice->use_stun_cand=%d, tp_ice->use_turn_flag=%d", 
+		  tp_ice, tp_ice->base.use_upnp_flag, 
+		  tp_ice->base.use_stun_cand,
+		  tp_ice->base.use_turn_flag));
+	// set use upnp tcp flag
+	pj_ice_strans_set_use_upnp_flag(tp_ice->ice_st, tp_ice->base.use_upnp_flag);
+	// set use stun cand flag
+	pj_ice_strans_set_use_stun_cand(tp_ice->ice_st, tp_ice->base.use_stun_cand);
+	// set use turn flag
+	pj_ice_strans_set_use_turn_flag(tp_ice->ice_st, tp_ice->base.use_turn_flag);
+	// set ice role
+	pj_ice_strans_set_ice_role(tp_ice->ice_st, ice_role);
+	// set app's lock object
+	pj_ice_strans_set_app_lock(tp_ice->ice_st, tp_ice->base.app_lock);
+	// set dest uri
+	pj_ice_strans_set_dest_uri(tp_ice->ice_st, tp_ice->base.dest_uri);
+
+	// if it is UAS, retrieve remote turn attribute and save it to remo_turn config
+	if ((tp_ice->base.use_turn_flag & TURN_FLAG_USE_UAC_TURN) > 0 && 
+		ice_role == PJ_ICE_SESS_ROLE_CONTROLLED)
+		retrieve_remote_turn_attr(tp_ice, rem_sdp->media[media_index], &rem_sdp->inv_cid);
+
     status = pj_ice_strans_init_ice(tp_ice->ice_st, ice_role, NULL, NULL);
 
     /* Done */
@@ -1160,7 +1497,7 @@ static pj_status_t transport_encode_sdp(pjmedia_transport *tp,
 				        const pjmedia_sdp_session *rem_sdp,
 				        unsigned media_index)
 {
-    struct transport_ice *tp_ice = (struct transport_ice*)tp;
+	struct transport_ice *tp_ice = (struct transport_ice*)tp;
     pj_status_t status;
 
     /* Validate media transport */
@@ -1180,7 +1517,150 @@ static pj_status_t transport_encode_sdp(pjmedia_transport *tp,
 	    return PJMEDIA_SDP_EINPROTO;
 	}
     }
+#if 1
+	if (rem_sdp) { // got remote sdp
+		/* Do checking stuffs here.. */
+		/* get user id */
+		pjmedia_sdp_attr *userid, *deviceid, *turnsrv, *turnpwd;
 
+		if (rem_sdp->media_count > 0) {
+			// user id
+			userid = pjmedia_sdp_attr_find2(rem_sdp->media[0]->attr_count, 
+				rem_sdp->media[0]->attr, "X-adapter1", NULL);
+			if (userid == NULL)
+				pjmedia_transport_set_remote_userid(&tp_ice->base, "", 0);
+			else
+				pjmedia_transport_set_remote_userid(&tp_ice->base, 
+				userid->value.ptr, userid->value.slen);
+
+			// device id
+			deviceid = pjmedia_sdp_attr_find2(rem_sdp->media[0]->attr_count, 
+				rem_sdp->media[0]->attr, "X-adapter2", NULL);
+			if (deviceid == NULL)
+				pjmedia_transport_set_remote_deviceid(&tp_ice->base, "", 0);
+			else
+				pjmedia_transport_set_remote_deviceid(&tp_ice->base, 
+				deviceid->value.ptr, deviceid->value.slen);
+
+			// turn server
+			turnsrv = pjmedia_sdp_attr_find2(rem_sdp->media[0]->attr_count, 
+				rem_sdp->media[0]->attr, "X-adapter3", NULL);
+			if (turnsrv == NULL)
+				pjmedia_transport_set_remote_turnsvr(&tp_ice->base, "", 0);
+			else
+				pjmedia_transport_set_remote_turnsvr(&tp_ice->base, 
+				turnsrv->value.ptr, turnsrv->value.slen);
+
+			// turn password
+			turnpwd = pjmedia_sdp_attr_find2(rem_sdp->media[0]->attr_count, 
+				rem_sdp->media[0]->attr, "X-adapter4", NULL);
+			if (turnpwd == NULL)
+				pjmedia_transport_set_remote_turnpwd(&tp_ice->base, "", 0);
+			else
+				pjmedia_transport_set_remote_turnpwd(&tp_ice->base, 
+				turnpwd->value.ptr, turnpwd->value.slen);
+		}
+	}
+	
+
+	{
+		/* We add a proprietary attribute here.. */
+		pjmedia_sdp_attr *my_attr;
+		char userid[64];
+		char deviceid[128];
+		char turnsrv[128];
+		char turnpwd[128];
+		char inv_recv_time[64];
+		char use_turn_flag[64];
+		pj_parsed_time inv_recv_ptime;
+		int len;
+		char nat_type[64];
+
+		// user id
+		memset(userid, 0, sizeof(userid));
+		pjmedia_transport_get_local_userid(&tp_ice->base, userid);
+		my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+		pj_strdup2(sdp_pool, &my_attr->name, "X-adapter1");
+		pj_strdup2(sdp_pool, &my_attr->value, userid);
+
+		pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+			sdp_local->media[media_index]->attr,
+			my_attr);
+
+		// device id
+		memset(deviceid, 0, sizeof(deviceid));
+		pjmedia_transport_get_local_deviceid(&tp_ice->base, deviceid);
+		my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+		pj_strdup2(sdp_pool, &my_attr->name, "X-adapter2");
+		pj_strdup2(sdp_pool, &my_attr->value, deviceid);
+
+		pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+			sdp_local->media[media_index]->attr,
+			my_attr);
+
+		// turn server
+		memset(turnsrv, 0, sizeof(turnsrv));
+		pjmedia_transport_get_local_turnsrv(&tp_ice->base, turnsrv);
+		my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+		pj_strdup2(sdp_pool, &my_attr->name, "X-adapter3");
+		pj_strdup2(sdp_pool, &my_attr->value, turnsrv);
+
+		pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+			sdp_local->media[media_index]->attr,
+			my_attr);
+
+		// turn password
+		memset(turnpwd, 0, sizeof(turnpwd));
+		pjmedia_transport_get_local_turnpwd(&tp_ice->base, turnpwd);
+		my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+		pj_strdup2(sdp_pool, &my_attr->name, "X-adapter4");
+		pj_strdup2(sdp_pool, &my_attr->value, turnpwd);
+
+		pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+			sdp_local->media[media_index]->attr,
+			my_attr);
+
+		if ((tp_ice->base.use_turn_flag & TURN_FLAG_USE_TCP_TURN) > 0) {
+			// use turn flag
+			memset(use_turn_flag, 0, sizeof(use_turn_flag));
+			sprintf(use_turn_flag, "%d", tp_ice->base.use_turn_flag);
+			my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+			pj_strdup2(sdp_pool, &my_attr->name, "X-adapter5");
+			pj_strdup2(sdp_pool, &my_attr->value, use_turn_flag);
+
+			pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+				sdp_local->media[media_index]->attr,
+				my_attr);
+		}
+
+		// Invite message receive timestamp
+		memset(inv_recv_time, 0, sizeof(inv_recv_time));
+		pj_time_decode(&tp_ice->base.inv_recv_time, &inv_recv_ptime);
+		len = pj_ansi_snprintf(inv_recv_time, sizeof(inv_recv_time),
+			"%04d-%02d-%02d_%02d:%02d:%02d.%03d",
+			inv_recv_ptime.year, inv_recv_ptime.mon+1, inv_recv_ptime.day, 
+			inv_recv_ptime.hour, inv_recv_ptime.min, inv_recv_ptime.sec, inv_recv_ptime.msec);
+
+		my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+		pj_strdup2(sdp_pool, &my_attr->name, "inv-time");
+		pj_strdup2(sdp_pool, &my_attr->value, inv_recv_time);
+
+		pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+			sdp_local->media[media_index]->attr,
+			my_attr);
+
+		// nat type 
+		memset(nat_type, 0, sizeof(nat_type));
+		pjmedia_transport_get_local_nattype(&tp_ice->base, nat_type);
+		my_attr = PJ_POOL_ALLOC_T(sdp_pool, pjmedia_sdp_attr);
+		pj_strdup2(sdp_pool, &my_attr->name, "nat-type");
+		pj_strdup2(sdp_pool, &my_attr->value, nat_type);
+
+		pjmedia_sdp_attr_add(&sdp_local->media[media_index]->attr_count,
+			sdp_local->media[media_index]->attr,
+			my_attr);
+	}
+#endif
     if (tp_ice->initial_sdp) {
 	if (rem_sdp) {
 	    status = create_initial_answer(tp_ice, sdp_pool, sdp_local, 
@@ -1220,7 +1700,7 @@ static pj_status_t start_ice(struct transport_ice *tp_ice,
     const pjmedia_sdp_attr *ufrag_attr, *pwd_attr;
     pj_ice_sess_cand *cand;
     unsigned i, cand_cnt;
-    pj_status_t status;
+	pj_status_t status;
 
     get_ice_attr(rem_sdp, rem_m, &ufrag_attr, &pwd_attr);
 
@@ -1230,7 +1710,7 @@ static pj_status_t start_ice(struct transport_ice *tp_ice,
 			  sizeof(pj_ice_sess_cand));
 
     /* Get all candidates in the media */
-    cand_cnt = 0;
+	cand_cnt = 0;
     for (i=0; i<rem_m->attr_count && cand_cnt < PJ_ICE_MAX_CAND; ++i) {
 	pjmedia_sdp_attr *attr;
 
@@ -1251,7 +1731,7 @@ static pj_status_t start_ice(struct transport_ice *tp_ice,
 	}
 
 	cand_cnt++;
-    }
+	}
 
     /* Start ICE */
     return pj_ice_strans_start_ice(tp_ice->ice_st, &ufrag_attr->value, 
@@ -1416,7 +1896,13 @@ static pj_status_t transport_media_start(pjmedia_transport *tp,
 	     * create a new ICE session with that ufrag/pwd pair.
 	     */
 	    get_ice_attr(sdp_local, sdp_local->media[media_index], 
-			 &ufrag_attr, &pwd_attr);
+			&ufrag_attr, &pwd_attr);
+
+		// if it is UAS, retrieve remote turn attribute and save it to remo_turn config
+		if ((tp_ice->base.use_turn_flag & TURN_FLAG_USE_UAC_TURN) > 0 && 
+			tp_ice->rem_offer_state.local_role == PJ_ICE_SESS_ROLE_CONTROLLED)
+			retrieve_remote_turn_attr(tp_ice, sdp_local->media[media_index], &sdp_local->inv_cid);
+
 	    status = pj_ice_strans_init_ice(tp_ice->ice_st, 
 					    tp_ice->rem_offer_state.local_role,
 					    &ufrag_attr->value, 
@@ -1441,7 +1927,7 @@ static pj_status_t transport_media_start(pjmedia_transport *tp,
 
 
 	/* start ICE */
-    }
+	}
 
     /* Now start ICE */
     status = start_ice(tp_ice, tmp_pool, rem_sdp, media_index);
@@ -1484,7 +1970,8 @@ static pj_status_t transport_get_info(pjmedia_transport *tp,
     if (status != PJ_SUCCESS)
 	return status;
 
-    pj_sockaddr_cp(&info->sock_info.rtp_addr_name, &cand.addr);
+	if (pj_sockaddr_has_addr(&cand.addr))
+    	pj_sockaddr_cp(&info->sock_info.rtp_addr_name, &cand.addr);
 
     /* Get RTCP default address */
     if (tp_ice->comp_cnt > 1) {
@@ -1492,7 +1979,8 @@ static pj_status_t transport_get_info(pjmedia_transport *tp,
 	if (status != PJ_SUCCESS)
 	    return status;
 
-	pj_sockaddr_cp(&info->sock_info.rtcp_addr_name, &cand.addr);
+	if (pj_sockaddr_has_addr(&cand.addr))
+		pj_sockaddr_cp(&info->sock_info.rtcp_addr_name, &cand.addr);
     }
 
     /* Set remote address originating RTP & RTCP if this transport has 
@@ -1551,7 +2039,7 @@ static pj_status_t transport_attach  (pjmedia_transport *tp,
 						     pj_ssize_t),
 				      void (*rtcp_cb)(void*,
 						      void*,
-						      pj_ssize_t))
+							  pj_ssize_t))
 {
     struct transport_ice *tp_ice = (struct transport_ice*)tp;
 
@@ -1626,7 +2114,7 @@ static pj_status_t transport_send_rtcp2(pjmedia_transport *tp,
     struct transport_ice *tp_ice = (struct transport_ice*)tp;
     if (tp_ice->comp_cnt > 1) {
 	if (addr == NULL) {
-	    addr = &tp_ice->remote_rtcp;
+		addr = &tp_ice->remote_rtcp;
 	    addr_len = pj_sockaddr_get_len(addr);
 	}
 	return pj_ice_strans_sendto(tp_ice->ice_st, 2, pkt, size, 
@@ -1679,7 +2167,7 @@ static void ice_on_rx_data(pj_ice_strans *ice_st, unsigned comp_id,
 
 		/* Check if the source address is recognized. */
 		if (pj_sockaddr_cmp(src_addr, &tp_ice->rtp_src_addr) != 0) {
-		    /* Remember the new source address. */
+			/* Remember the new source address. */
 		    pj_sockaddr_cp(&tp_ice->rtp_src_addr, src_addr);
 		    /* Reset counter */
 		    tp_ice->rtp_src_cnt = 0;
@@ -1691,8 +2179,8 @@ static void ice_on_rx_data(pj_ice_strans *ice_st, unsigned comp_id,
 		} else {
 		    char addr_text[80];
 
-		    /* Set remote RTP address to source address */
-		    pj_sockaddr_cp(&tp_ice->remote_rtp, &tp_ice->rtp_src_addr);
+			/* Set remote RTP address to source address */
+			pj_sockaddr_cp(&tp_ice->remote_rtp, &tp_ice->rtp_src_addr);
 		    tp_ice->addr_len = pj_sockaddr_get_len(&tp_ice->remote_rtp);
 
 		    /* Reset counter */
@@ -1748,7 +2236,7 @@ static void ice_on_rx_data(pj_ice_strans *ice_st, unsigned comp_id,
 		if (tp_ice->rtcp_src_cnt < PJMEDIA_RTCP_NAT_PROBATION_CNT) {
 		    discard = PJ_TRUE;
 		} else {
-		    tp_ice->rtcp_src_cnt = 0;
+			tp_ice->rtcp_src_cnt = 0;
 		    pj_sockaddr_cp(&tp_ice->rtcp_src_addr, src_addr);
 		    pj_sockaddr_cp(&tp_ice->remote_rtcp, src_addr);
 
@@ -1764,7 +2252,7 @@ static void ice_on_rx_data(pj_ice_strans *ice_st, unsigned comp_id,
 	}
 
 	if (!discard)
-	    (*tp_ice->rtcp_cb)(tp_ice->stream, pkt, size);
+		(*tp_ice->rtcp_cb)(tp_ice->stream, pkt, size);
     }
 
     PJ_UNUSED_ARG(src_addr_len);
@@ -1773,15 +2261,66 @@ static void ice_on_rx_data(pj_ice_strans *ice_st, unsigned comp_id,
 
 static void ice_on_ice_complete(pj_ice_strans *ice_st, 
 				pj_ice_strans_op op,
-			        pj_status_t result)
+				pj_status_t result,
+				pj_sockaddr *turn_mapped_addr)
 {
     struct transport_ice *tp_ice;
 
     tp_ice = (struct transport_ice*) pj_ice_strans_get_user_data(ice_st);
 
+	tp_ice->base.tunnel_type = pj_ice_strans_get_use_tunnel_type(ice_st);
+
+	tp_ice->base.ice_retry_count = 1;//pj_ice_strans_get_transmit_count(ice_st);
+
     /* Notify application */
     if (tp_ice->cb.on_ice_complete)
-	(*tp_ice->cb.on_ice_complete)(&tp_ice->base, op, result);
+		(*tp_ice->cb.on_ice_complete)(&tp_ice->base, op, result, turn_mapped_addr);
+}
+
+/* TURN allocated */
+static void ice_on_turn_allocated(pj_ice_strans *ice_st, pj_sockaddr_t *turn_srv)
+{
+	struct transport_ice *tp_ice;
+	char turn_addr[PJ_INET6_ADDRSTRLEN] = {0};
+
+	tp_ice = (struct transport_ice*) pj_ice_strans_get_user_data(ice_st);
+
+	pj_sockaddr_print(turn_srv, turn_addr, sizeof(turn_addr), 3);
+
+	memset(tp_ice->base.local_turnsvr, 0, sizeof(tp_ice->base.local_turnsvr));
+	memcpy(tp_ice->base.local_turnsvr, turn_addr, strlen(turn_addr));
+
+}
+
+/* STUN binding complete */
+static pj_status_t ice_on_stun_binding_complete(pj_ice_strans *ice_st,
+										 pj_sockaddr *local_addr,  
+										 int ip_chagned_type)
+{
+	struct transport_ice *tp_ice;
+
+	tp_ice = (struct transport_ice*) pj_ice_strans_get_user_data(ice_st);
+	
+	if (tp_ice->cb.on_stun_binding_complete)
+		(*tp_ice->cb.on_stun_binding_complete)(&tp_ice->base, 
+							local_addr, ip_chagned_type);
+
+}
+
+static pj_status_t ice_on_tcp_server_binding_complete(pj_ice_strans *ice_st,
+											 pj_sockaddr *external_addr,
+											 pj_sockaddr *local_addr)
+{
+	struct transport_ice *tp_ice;
+
+	tp_ice = (struct transport_ice*) pj_ice_strans_get_user_data(ice_st);
+	
+	if (tp_ice->cb.on_tcp_server_binding_complete)
+		return (*tp_ice->cb.on_tcp_server_binding_complete)(&tp_ice->base, 
+									external_addr, local_addr);
+
+	return PJ_SUCCESS;
+
 }
 
 
@@ -1825,3 +2364,236 @@ static pj_status_t transport_destroy(pjmedia_transport *tp)
     return PJ_SUCCESS;
 }
 
+/* Dean Added */
+PJ_DEF(pj_bool_t) pjmedia_ice_get_ice_restart(void *user_data)
+{
+	struct transport_ice *ice_tp = (struct transport_ice *)user_data;
+
+	return ice_tp->rem_offer_state.ice_restart;
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_ice_restart(void *user_data, pj_bool_t ice_restart)
+{
+	struct transport_ice *ice_tp = (struct transport_ice *)user_data;
+
+	ice_tp->rem_offer_state.ice_restart = ice_restart;;
+}
+
+PJ_DEF(natnl_tunnel_type) pjmedia_ice_get_use_tunnel_type(void *user_data)
+{
+	struct transport_ice *ice_tp = (struct transport_ice *)user_data;
+
+	return pj_ice_strans_get_use_tunnel_type(ice_tp->ice_st);
+}
+
+PJ_DEF(void) pjmedia_ice_set_turn_password(void *user_data, pj_str_t turn_password)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	pj_ice_strans_set_turn_password(tp_ice->ice_st, turn_password);
+}
+
+#if 0
+PJ_DEF(void) pjmedia_ice_set_use_upnp_flag(void *user_data, int use_upnp_flag)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+
+	PJ_LOG(4,(tp_ice->base.name, 
+		"tp_ice=%p, tp_ice->use_upnp_flag=%d", tp_ice, use_upnp_flag));
+
+	tp_ice->base.use_upnp_flag = use_upnp_flag;
+}
+
+PJ_DEF(void) pjmedia_ice_set_use_stun_cand(void *user_data, pj_bool_t use_stun_cand)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+
+	PJ_LOG(4,(tp_ice->base.name, 
+		"tp_ice=%p, tp_ice->use_stun_cand=%d", tp_ice, use_stun_cand));
+
+	 tp_ice->base.use_stun_cand = use_stun_cand;
+}
+
+PJ_DEF(void) pjmedia_ice_set_use_turn_flag(void *user_data, int use_turn_flag)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+
+	PJ_LOG(4,(tp_ice->base.name, 
+		"tp_ice=%p, tp_ice->use_turn_flag=%d", tp_ice, use_turn_flag));
+
+	tp_ice->base.use_turn_flag = use_turn_flag;
+}
+
+//====== local and remote user id ======
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_local_userid(void *user_data, char *user_id)
+{
+	if(user_id) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(user_id, tp_ice->base.local_userid, sizeof(tp_ice->base.local_userid));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_local_userid(void *user_data, char *user_id, int user_id_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.local_userid) {
+		strncpy(tp_ice->base.local_userid, user_id, user_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_remote_userid(void *user_data, char *user_id, int user_id_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.remote_userid) {
+		strncpy(tp_ice->base.remote_userid, user_id, user_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_remote_userid(void *user_data, char *user_id)
+{
+	if(user_id) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(user_id, tp_ice->base.remote_userid, sizeof(tp_ice->base.remote_userid));
+	}
+}
+
+//====== local and remote device id ======
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_local_deviceid(void *user_data, char *device_id)
+{
+	if(device_id) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(device_id, tp_ice->base.local_deviceid, sizeof(tp_ice->base.local_deviceid));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_local_deviceid(void *user_data, char *device_id, int device_id_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.local_deviceid) {
+		strncpy(tp_ice->base.local_deviceid, device_id, device_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_remote_deviceid(void *user_data, char *device_id, int user_id_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.remote_deviceid) {
+		strncpy(tp_ice->base.remote_deviceid, device_id, user_id_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_remote_deviceid(void *user_data, char *device_id)
+{
+	if(device_id) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(device_id, tp_ice->base.remote_deviceid, sizeof(tp_ice->base.remote_deviceid));
+	}
+}
+
+//====== local and remote turn server ======
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_local_turnsrv(void *user_data, char *turn_server)
+{
+	if(turn_server) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(turn_server, tp_ice->base.local_turnsvr, sizeof(tp_ice->base.local_turnsvr));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_local_turnsrv(void *user_data, char *turn_server, int turn_server_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.local_turnsvr) {
+		strncpy(tp_ice->base.local_turnsvr, turn_server, turn_server_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_remote_turnsvr(void *user_data, char *turn_server, int turn_server_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.remote_turnsvr) {
+		strncpy(tp_ice->base.remote_turnsvr, turn_server, turn_server_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_remote_turnsvr(void *user_data, char *turn_server)
+{
+	if(turn_server) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(turn_server, tp_ice->base.remote_turnsvr, sizeof(tp_ice->base.remote_turnsvr));
+	}
+}
+
+//====== local and remote turn password ======
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_local_turnpwd(void *user_data, char *turn_pwd)
+{
+	if(turn_pwd) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(turn_pwd, tp_ice->base.local_turnpwd, sizeof(tp_ice->base.local_turnpwd));
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_local_turnpwd(void *user_data, char *turn_pwd, int turn_pwd_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.local_turnpwd) {
+		strncpy(tp_ice->base.local_turnpwd, turn_pwd, turn_pwd_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_set_remote_turnpwd(void *user_data, char *turn_pwd, int turn_pwd_len)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	if(tp_ice->base.remote_turnpwd) {
+		strncpy(tp_ice->base.remote_turnpwd, turn_pwd, turn_pwd_len);
+	}
+}
+
+/* Dean Added */
+PJ_DEF(void) pjmedia_ice_get_remote_turnpwd(void *user_data, char *turn_pwd)
+{
+	if(turn_pwd) {
+		struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+		strncpy(turn_pwd, tp_ice->base.remote_turnpwd, sizeof(tp_ice->base.remote_turnpwd));
+	}
+}
+#endif
+
+PJ_DEF(pj_bool_t) pjmedia_ice_get_local_path_selected(void *user_data)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	return pj_ice_strans_get_local_path_selected(tp_ice->ice_st);
+}
+
+PJ_DEF(natnl_addr_changed_type) pjmedia_ice_get_addr_chagned_type(void *user_data)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	return pj_ice_strans_get_addr_changed_type(tp_ice->ice_st);
+}
+
+#if 0
+PJ_DEF(pj_str_t *) pjmedia_ice_get_dest_uri(void *user_data)
+{
+	struct transport_ice *tp_ice = (struct transport_ice *)user_data;
+	
+	return pj_ice_strans_get_dest_uri(tp_ice->ice_st);
+}
+#endif

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: txdata_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -475,7 +475,7 @@ static int txdata_test_uri_params(void)
 
     /* Now parse the message. */
     pj_list_init(&err_list);
-    msg = pjsip_parse_msg( tdata->pool, msgbuf, len, &err_list);
+    msg = pjsip_parse_msg( 0, tdata->pool, msgbuf, len, &err_list);
     if (msg == NULL) {
 	pjsip_parser_err_report *e;
 
@@ -484,7 +484,7 @@ static int txdata_test_uri_params(void)
 	e = err_list.next;
 	while (e != &err_list) {
 	    PJ_LOG(3,(THIS_FILE, "     %s in line %d col %d hname=%.*s",
-				 pj_exception_id_name(e->except_code), 
+				 pj_exception_id_name(0, e->except_code),
 				 e->line, e->col+1,
 				 (int)e->hname.slen,
 				 e->hname.ptr));

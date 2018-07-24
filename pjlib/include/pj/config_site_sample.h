@@ -73,7 +73,7 @@
      */
     #define PJSIP_MAX_TSX_COUNT 		31
     #define PJSIP_MAX_DIALOG_COUNT 		31
-    #define PJSUA_MAX_CALLS			4
+    #define PJSUA_MAX_CALLS			15
 
     /*
      * PJSUA settings
@@ -200,7 +200,7 @@
     /* Set maximum number of dialog/transaction/calls to minimum */
     #define PJSIP_MAX_TSX_COUNT 		31
     #define PJSIP_MAX_DIALOG_COUNT 		31
-    #define PJSUA_MAX_CALLS			4
+    #define PJSUA_MAX_CALLS			15
 
     /* Other pjsua settings */
     #define PJSUA_MAX_ACC			4
@@ -347,7 +347,7 @@
     /* Set maximum number of dialog/transaction/calls to minimum */
     #define PJSIP_MAX_TSX_COUNT 		31
     #define PJSIP_MAX_DIALOG_COUNT 		31
-    #define PJSUA_MAX_CALLS			4
+    #define PJSUA_MAX_CALLS			15
 
     /* Other pjsua settings */
     #define PJSUA_MAX_ACC			4
@@ -401,7 +401,7 @@
 #     define PJSIP_MAX_NET_EVENTS	10
 #   endif
 
-#   define PJSUA_MAX_CALLS		512
+#   define PJSUA_MAX_CALLS		15
 
 #endif
 

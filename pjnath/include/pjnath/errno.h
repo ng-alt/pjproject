@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: errno.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -70,6 +70,11 @@
  * STUN transaction has timed out
  */
 #define PJNATH_ESTUNTIMEDOUT	    (PJNATH_ERRNO_START+4)  /* 370004 */
+/**
+ * @hideinitializer
+ * Invalid DTLS record.
+ */
+#define PJNATH_EINDTLSRECORD	    (PJNATH_ERRNO_START+5)  /* 370005 */
 
 
 /**
@@ -216,6 +221,15 @@
  * Invalid or unsupported TURN transport.
  */
 #define PJNATH_ETURNINTP	    (PJNATH_ERRNO_START+120) /* 370120 */
+
+/************************************************************
+ * TCP ERROR CODES
+ ***********************************************************/
+/**
+ * @hideinitializer
+ * Invalid or unsupported TURN transport.
+ */
+#define PJNATH_ETCPINTP	    (PJNATH_ERRNO_START+320) /* 370320 */
 
 
 

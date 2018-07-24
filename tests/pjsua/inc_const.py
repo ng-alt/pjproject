@@ -1,4 +1,4 @@
-# $Id$
+# $Id: inc_const.py 2052 2008-06-25 18:18:32Z nanang $
 # Useful constants
 
 

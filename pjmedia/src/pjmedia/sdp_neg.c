@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sdp_neg.c 3812 2011-10-11 05:06:42Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -185,7 +185,9 @@ PJ_DEF(pj_status_t) pjmedia_sdp_neg_get_active_local( pjmedia_sdp_neg *neg,
 					const pjmedia_sdp_session **local)
 {
     PJ_ASSERT_RETURN(neg && local, PJ_EINVAL);
-    PJ_ASSERT_RETURN(neg->active_local_sdp, PJMEDIA_SDPNEG_ENOACTIVE);
+    //PJ_ASSERT_RETURN(neg->active_local_sdp, PJMEDIA_SDPNEG_ENOACTIVE);
+	if (!neg->active_local_sdp)
+		return PJMEDIA_SDPNEG_ENOACTIVE;
 
     *local = neg->active_local_sdp;
     return PJ_SUCCESS;
@@ -742,7 +744,8 @@ static pj_status_t amr_toggle_octet_align(pj_pool_t *pool,
 /* Update single local media description to after receiving answer
  * from remote.
  */
-static pj_status_t process_m_answer( pj_pool_t *pool,
+static pj_status_t process_m_answer( int inst_id,
+					 pj_pool_t *pool,
 				     pjmedia_sdp_media *offer,
 				     pjmedia_sdp_media *answer,
 				     pj_bool_t allow_asym)
@@ -836,7 +839,7 @@ static pj_status_t process_m_answer( pj_pool_t *pool,
 	    /* Find matching answer */
 	    pt = pj_strtoul(fmt);
 
-	    if (pt < 96) {
+	    if (pt < 96 || pt == 5000) {  // dean : 5000 is for WebRTC data channel.
 		for (j=0; j<answer->desc.fmt_count; ++j) {
 		    if (pj_strcmp(fmt, &answer->desc.fmt[j])==0)
 			break;
@@ -855,7 +858,7 @@ static pj_status_t process_m_answer( pj_pool_t *pool,
 		    pj_assert(!"Bug! Offer should have been validated");
 		    return PJ_EBUG;
 		}
-		pjmedia_sdp_attr_get_rtpmap(a, &or_);
+		pjmedia_sdp_attr_get_rtpmap(inst_id, a, &or_);
 
 		/* Find paylaod in answer SDP with matching 
 		 * encoding name and clock rate.
@@ -865,7 +868,7 @@ static pj_status_t process_m_answer( pj_pool_t *pool,
 						     &answer->desc.fmt[j]);
 		    if (a) {
 			pjmedia_sdp_rtpmap ar;
-			pjmedia_sdp_attr_get_rtpmap(a, &ar);
+			pjmedia_sdp_attr_get_rtpmap(inst_id, a, &ar);
 
 			/* See if encoding name, clock rate, and channel
 			 * count match 
@@ -989,7 +992,8 @@ static pj_status_t process_m_answer( pj_pool_t *pool,
 /* Update local media session (offer) to create active local session
  * after receiving remote answer.
  */
-static pj_status_t process_answer(pj_pool_t *pool,
+static pj_status_t process_answer(int inst_id, 
+				  pj_pool_t *pool,
 				  pjmedia_sdp_session *offer,
 				  pjmedia_sdp_session *answer,
 				  pj_bool_t allow_asym,
@@ -1027,7 +1031,7 @@ static pj_status_t process_answer(pj_pool_t *pool,
 	    continue;
 	}
 
-	status = process_m_answer(pool, offer->media[omi], answer->media[ami],
+	status = process_m_answer(inst_id, pool, offer->media[omi], answer->media[ami],
 				  allow_asym);
 
 	/* If media type is mismatched, just disable the media. */
@@ -1057,7 +1061,8 @@ static pj_status_t process_answer(pj_pool_t *pool,
 }
 
 /* Try to match offer with answer. */
-static pj_status_t match_offer(pj_pool_t *pool,
+static pj_status_t match_offer(int inst_id, 
+				   pj_pool_t *pool,
 			       pj_bool_t prefer_remote_codec_order,
 			       const pjmedia_sdp_media *offer,
 			       const pjmedia_sdp_media *preanswer,
@@ -1106,7 +1111,7 @@ static pj_status_t match_offer(pj_pool_t *pool,
 
 	    pt = pj_strtoul(&master->desc.fmt[i]);
 	    
-	    if (pt < 96) {
+	    if (pt < 96 || pt == 5000) { // dean : 5000 is for WebRTC data channel.
 		/* For static payload type, it's enough to compare just
 		 * the payload number.
 		 */
@@ -1147,7 +1152,7 @@ static pj_status_t match_offer(pj_pool_t *pool,
 		    pj_assert(!"Bug! Offer should have been validated");
 		    return PJMEDIA_SDP_EMISSINGRTPMAP;
 		}
-		pjmedia_sdp_attr_get_rtpmap(a, &or_);
+		pjmedia_sdp_attr_get_rtpmap(inst_id, a, &or_);
 
 		if (!pj_stricmp2(&or_.enc_name, "telephone-event")) {
 		    master_has_telephone_event = 1;
@@ -1169,7 +1174,7 @@ static pj_status_t match_offer(pj_pool_t *pool,
 						     &slave->desc.fmt[j]);
 		    if (a) {
 			pjmedia_sdp_rtpmap lr;
-			pjmedia_sdp_attr_get_rtpmap(a, &lr);
+			pjmedia_sdp_attr_get_rtpmap(inst_id, a, &lr);
 
 			/* See if encoding name, clock rate, and
 			 * channel count  match 
@@ -1306,7 +1311,8 @@ static pj_status_t match_offer(pj_pool_t *pool,
 }
 
 /* Create complete answer for remote's offer. */
-static pj_status_t create_answer( pj_pool_t *pool,
+static pj_status_t create_answer( int inst_id, 
+				  pj_pool_t *pool,
 				  pj_bool_t prefer_remote_codec_order,
 				  const pjmedia_sdp_session *initial,
 				  const pjmedia_sdp_session *offer,
@@ -1355,7 +1361,7 @@ static pj_status_t create_answer( pj_pool_t *pool,
 		media_used[j] == 0)
 	    {
 		/* See if it has matching codec. */
-		status = match_offer(pool, prefer_remote_codec_order, 
+		status = match_offer(inst_id, pool, prefer_remote_codec_order, 
 				     om, im, &am);
 		if (status == PJ_SUCCESS) {
 		    /* Mark media as used. */
@@ -1415,7 +1421,8 @@ PJ_DEF(pj_status_t) pjmedia_sdp_neg_cancel_offer(pjmedia_sdp_neg *neg)
 
 
 /* The best bit: SDP negotiation function! */
-PJ_DEF(pj_status_t) pjmedia_sdp_neg_negotiate( pj_pool_t *pool,
+PJ_DEF(pj_status_t) pjmedia_sdp_neg_negotiate( int inst_id, 
+						   pj_pool_t *pool,
 					       pjmedia_sdp_neg *neg,
 					       pj_bool_t allow_asym)
 {
@@ -1433,7 +1440,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_neg_negotiate( pj_pool_t *pool,
 
     if (neg->has_remote_answer) {
 	pjmedia_sdp_session *active;
-	status = process_answer(pool, neg->neg_local_sdp, neg->neg_remote_sdp,
+	status = process_answer(inst_id, pool, neg->neg_local_sdp, neg->neg_remote_sdp,
 			        allow_asym, &active);
 	if (status == PJ_SUCCESS) {
 	    /* Only update active SDPs when negotiation is successfull */
@@ -1443,7 +1450,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_neg_negotiate( pj_pool_t *pool,
     } else {
 	pjmedia_sdp_session *answer = NULL;
 
-	status = create_answer(pool, neg->prefer_remote_codec_order, 
+	status = create_answer(inst_id, pool, neg->prefer_remote_codec_order, 
 			       neg->neg_local_sdp, neg->neg_remote_sdp,
 			       &answer);
 	if (status == PJ_SUCCESS) {

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: thread.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -81,14 +81,14 @@ static void* thread_proc(pj_uint32_t *pcounter)
 
     pj_bzero(desc, sizeof(desc));
 
-    rc = pj_thread_register("thread", desc, &this_thread);
+    rc = pj_thread_register(0, "thread", desc, &this_thread);
     if (rc != PJ_SUCCESS) {
         app_perror("...error in pj_thread_register", rc);
         return NULL;
     }
 
     /* Test that pj_thread_this() works */
-    this_thread = pj_thread_this();
+    this_thread = pj_thread_this(0);
     if (this_thread == NULL) {
         PJ_LOG(3,(THIS_FILE, "...error: pj_thread_this() returns NULL!"));
         return NULL;

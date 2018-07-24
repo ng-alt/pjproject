@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: wav_player.c 4116 2012-04-30 17:33:03Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -157,6 +157,7 @@ static pj_status_t fill_buffer(struct file_reader_port *fport)
                     int val = pjmedia_linear2alaw(0);
                     pj_memset(fport->eofpos, val, size_left);
                 }
+		size_left = 0;
             }
 
 	    /* Rewind file */
@@ -195,8 +196,9 @@ PJ_DEF(pj_status_t) pjmedia_wav_player_port_create( pj_pool_t *pool,
     PJ_ASSERT_RETURN(pool && filename && p_port, PJ_EINVAL);
 
     /* Check the file really exists. */
-    if (!pj_file_exists(filename)) {
-	return PJ_ENOTFOUND;
+	if (!pj_file_exists(filename)) {
+		PJ_LOG(4, ("wav_player.c", "pjmedia_wav_player_port_create() file not found."));
+		return PJ_ENOTFOUND;
     }
 
     /* Normalize ptime */
@@ -223,7 +225,7 @@ PJ_DEF(pj_status_t) pjmedia_wav_player_port_create( pj_pool_t *pool,
     }
 
     /* Open file. */
-    status = pj_file_open( pool, filename, PJ_O_RDONLY, &fport->fd);
+    status = pj_file_open( pool, filename, PJ_O_RDONLY, &fport->fd, NULL);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -452,6 +454,7 @@ PJ_DEF(pj_status_t) pjmedia_wav_player_port_set_pos(pjmedia_port *port,
 						    pj_uint32_t bytes )
 {
     struct file_reader_port *fport;
+    pj_status_t status;
 
     /* Sanity check */
     PJ_ASSERT_RETURN(port, PJ_EINVAL);
@@ -472,7 +475,13 @@ PJ_DEF(pj_status_t) pjmedia_wav_player_port_set_pos(pjmedia_port *port,
     pj_file_setpos( fport->fd, fport->fpos, PJ_SEEK_SET);
 
     fport->eof = PJ_FALSE;
-    return fill_buffer(fport);
+    status = fill_buffer(fport);
+    if (status != PJ_SUCCESS)
+	return status;
+
+    fport->readpos = fport->buf;
+
+    return PJ_SUCCESS;
 }
 
 

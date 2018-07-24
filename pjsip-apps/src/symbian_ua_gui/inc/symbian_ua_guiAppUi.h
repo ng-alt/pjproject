@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: symbian_ua_guiAppUi.h 3550 2011-05-05 05:33:27Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *

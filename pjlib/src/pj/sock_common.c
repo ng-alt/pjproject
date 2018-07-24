@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sock_common.c 3826 2011-10-18 09:41:56Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -26,8 +26,10 @@
 #include <pj/addr_resolv.h>
 #include <pj/string.h>
 #include <pj/compat/socket.h>
+//charles debug
+#include <pj/log.h>
 
-#if 0
+#if 1
     /* Enable some tracing */
     #include <pj/log.h>
     #define THIS_FILE   "sock_common.c"
@@ -128,8 +130,11 @@ PJ_DEF(pj_status_t) pj_sockaddr_in_set_str_addr( pj_sockaddr_in *addr,
 
     PJ_SOCKADDR_RESET_LEN(addr);
     addr->sin_family = AF_INET;
+#if PJ_ANDROID==1
+    //memset(addr->sin_zero,0, sizeof(addr->sin_zero));
+#else
     pj_bzero(addr->sin_zero, sizeof(addr->sin_zero));
-
+#endif
     if (str_addr && str_addr->slen) {
 	addr->sin_addr = pj_inet_addr(str_addr);
 	if (addr->sin_addr.s_addr == PJ_INADDR_NONE) {
@@ -203,7 +208,10 @@ PJ_DEF(pj_status_t) pj_sockaddr_in_init( pj_sockaddr_in *addr,
 
     PJ_SOCKADDR_RESET_LEN(addr);
     addr->sin_family = PJ_AF_INET;
+#if PJ_ANDROID==1
+#else
     pj_bzero(addr->sin_zero, sizeof(addr->sin_zero));
+#endif
     pj_sockaddr_in_set_port(addr, port);
     return pj_sockaddr_in_set_str_addr(addr, str_addr);
 }
@@ -785,7 +793,8 @@ PJ_DEF(pj_status_t) pj_gethostip(int af, pj_sockaddr *addr)
     PJ_SOCKADDR_RESET_LEN(addr);
 
 #if !defined(PJ_GETHOSTIP_DISABLE_LOCAL_RESOLUTION) || \
-    PJ_GETHOSTIP_DISABLE_LOCAL_RESOLUTION == 0
+	PJ_GETHOSTIP_DISABLE_LOCAL_RESOLUTION == 0
+	TRACE_((THIS_FILE, "pj_gethostip() pj_getaddrinfo1"));
     /* Get hostname's IP address */
     count = 1;
     status = pj_getaddrinfo(af, pj_gethostname(), &count, &ai);
@@ -798,7 +807,8 @@ PJ_DEF(pj_status_t) pj_gethostip(int af, pj_sockaddr *addr)
 
 	TRACE_((THIS_FILE, "hostname IP is %s",
 		pj_sockaddr_print(&ai.ai_addr, strip, sizeof(strip), 0)));
-    }
+	}
+	TRACE_((THIS_FILE, "pj_gethostip() pj_getaddrinfo2"));
 #else
     PJ_UNUSED_ARG(ai);
     PJ_UNUSED_ARG(count);
@@ -834,7 +844,7 @@ PJ_DEF(pj_status_t) pj_gethostip(int af, pj_sockaddr *addr)
 	status = pj_enum_ip_interface(af, &count, &cand_addr[start_if]);
 	if (status == PJ_SUCCESS && count) {
 	    /* Clear the port number */
-	    for (i=0; i<count; ++i)
+	    for (i=0; i<count; ++i)            
 		pj_sockaddr_set_port(&cand_addr[start_if+i], 0);
 
 	    /* For each candidate that we found so far (that is the hostname
@@ -971,7 +981,8 @@ PJ_DEF(pj_status_t) pj_getdefaultipinterface(int af, pj_sockaddr *addr)
     status = pj_sock_socket(af, pj_SOCK_DGRAM(), 0, &fd);
     if (status != PJ_SUCCESS) {
 	return status;
-    }
+	}
+	PJ_LOG(4, ("sock_common.c", "pj_getdefaultipinterface() pj_sock_socket."));
 
     if (af == PJ_AF_INET) {
 	cp = pj_str("1.1.1.1");
@@ -982,20 +993,23 @@ PJ_DEF(pj_status_t) pj_getdefaultipinterface(int af, pj_sockaddr *addr)
     if (status != PJ_SUCCESS) {
 	pj_sock_close(fd);
 	return status;
-    }
+	}
+	PJ_LOG(4, ("sock_common.c", "pj_getdefaultipinterface() pj_sockaddr_init."));
 
     status = pj_sock_connect(fd, &a, pj_sockaddr_get_len(&a));
     if (status != PJ_SUCCESS) {
 	pj_sock_close(fd);
 	return status;
-    }
+	}
+	PJ_LOG(4, ("sock_common.c", "pj_getdefaultipinterface() pj_sock_connect."));
 
     len = sizeof(a);
     status = pj_sock_getsockname(fd, &a, &len);
     if (status != PJ_SUCCESS) {
 	pj_sock_close(fd);
 	return status;
-    }
+	}
+	PJ_LOG(4, ("sock_common.c", "pj_getdefaultipinterface() pj_sock_getsockname."));
 
     pj_sock_close(fd);
 
@@ -1003,8 +1017,9 @@ PJ_DEF(pj_status_t) pj_getdefaultipinterface(int af, pj_sockaddr *addr)
     pj_bzero(zero, sizeof(zero));
     if (pj_memcmp(pj_sockaddr_get_addr(&a), zero,
 		  pj_sockaddr_get_addr_len(&a))==0)
-    {
-	return PJ_ENOTFOUND;
+	{
+		PJ_LOG(4, ("sock_common.c", "pj_getdefaultipinterface() interface not found."));
+		return PJ_ENOTFOUND;
     }
 
     pj_sockaddr_copy_addr(addr, &a);
@@ -1175,6 +1190,31 @@ PJ_DEF(pj_uint16_t) pj_IP_ADD_MEMBERSHIP(void)
 PJ_DEF(pj_uint16_t) pj_IP_DROP_MEMBERSHIP(void)
 {
     return PJ_IP_DROP_MEMBERSHIP;
+}
+
+PJ_DEF(pj_uint16_t) pj_TCP_KEEPALIVE(void)
+{
+	return PJ_TCP_KEEPALIVE;
+}
+
+PJ_DEF(pj_uint16_t) pj_SO_KEEPALIVE(void)
+{
+	return PJ_SO_KEEPALIVE;
+}
+
+PJ_DEF(pj_uint16_t) pj_TCP_KEEPIDLE(void)
+{
+	return PJ_TCP_KEEPIDLE;
+}
+
+PJ_DEF(pj_uint16_t) pj_TCP_KEEPINTVL(void)
+{
+	return PJ_TCP_KEEPINTVL;
+}
+
+PJ_DEF(pj_uint16_t) pj_TCP_KEEPCNT(void)
+{
+	return PJ_TCP_KEEPCNT;
 }
 
 PJ_DEF(int) pj_MSG_OOB(void)

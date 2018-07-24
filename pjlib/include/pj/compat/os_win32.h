@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_win32.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -109,7 +109,7 @@
 #define PJ_HAS_HIGH_RES_TIMER		1
 #define PJ_HAS_MALLOC			1
 #ifndef PJ_OS_HAS_CHECK_STACK
-#   define PJ_OS_HAS_CHECK_STACK	1
+#   define PJ_OS_HAS_CHECK_STACK	0
 #endif
 
 #ifdef UNICODE

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: transport_udp.c 3745 2011-09-08 06:47:28Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -17,6 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
+#include <pjmedia/natnl_stream.h>
 #include <pjmedia/transport_udp.h>
 #include <pj/addr_resolv.h>
 #include <pj/assert.h>
@@ -278,7 +279,8 @@ PJ_DEF(pj_status_t) pjmedia_transport_udp_attach( pjmedia_endpt *endpt,
     pj_ioqueue_callback rtp_cb, rtcp_cb;
     pj_ssize_t size;
     unsigned i;
-    pj_status_t status;
+	pj_status_t status;
+	long sobuf_size;
 
 
     /* Sanity check */
@@ -301,12 +303,26 @@ PJ_DEF(pj_status_t) pjmedia_transport_udp_attach( pjmedia_endpt *endpt,
     pj_memcpy(tp->base.name, pool->obj_name, PJ_MAX_OBJ_NAME);
     tp->base.op = &transport_udp_op;
     tp->base.type = PJMEDIA_TRANSPORT_TYPE_UDP;
+	tp->base.inst_id = pjmedia_endpt_get_inst_id(endpt);
 
     /* Copy socket infos */
     tp->rtp_sock = si->rtp_sock;
     tp->rtp_addr_name = si->rtp_addr_name;
     tp->rtcp_sock = si->rtcp_sock;
-    tp->rtcp_addr_name = si->rtcp_addr_name;
+	tp->rtcp_addr_name = si->rtcp_addr_name;
+
+#if 1 // natnl set stun socket recv and send buffer size.
+	sobuf_size = PJ_STUN_SOCK_PKT_LEN;
+	status = pj_sock_setsockopt(tp->rtp_sock, pj_SOL_SOCKET(), pj_SO_RCVBUF(),
+		&sobuf_size, sizeof(sobuf_size));
+	if (status != PJ_SUCCESS)
+		goto on_error;
+
+	status = pj_sock_setsockopt(tp->rtcp_sock, pj_SOL_SOCKET(), pj_SO_SNDBUF(),
+		&sobuf_size, sizeof(sobuf_size));
+	if (status != PJ_SUCCESS)
+		goto on_error;
+#endif
 
     /* If address is 0.0.0.0, use host's IP address */
     if (!pj_sockaddr_has_addr(&tp->rtp_addr_name)) {
@@ -835,6 +851,8 @@ static pj_status_t transport_media_create(pjmedia_transport *tp,
 				  unsigned media_index)
 {
     struct transport_udp *udp = (struct transport_udp*)tp;
+	tp->tunnel_type = NATNL_TUNNEL_TYPE_UDP;
+	//tp->call_id = media_index;
 
     PJ_ASSERT_RETURN(tp && pool, PJ_EINVAL);
     udp->media_options = options;

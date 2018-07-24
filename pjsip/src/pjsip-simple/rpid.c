@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: rpid.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -151,7 +151,7 @@ PJ_DEF(pj_status_t) pjrpid_add_element(pjpidf_pres *pres,
 	//pj_create_unique_string(pool, &person_id);
 	person_id.ptr = (char*)pj_pool_alloc(pool, PJ_GUID_STRING_LENGTH+2);
 	person_id.ptr += 2;
-	pj_generate_unique_string(&person_id);
+	pj_generate_unique_string(pool->factory->inst_id, &person_id);
 	person_id.ptr -= 2;
 	person_id.ptr[0] = 'p';
 	person_id.ptr[1] = 'j';

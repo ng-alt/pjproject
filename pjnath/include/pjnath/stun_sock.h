@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_sock.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -27,6 +27,7 @@
 #include <pjnath/stun_config.h>
 #include <pjlib-util/resolver.h>
 #include <pj/ioqueue.h>
+#include <pj/lock.h>
 #include <pj/sock.h>
 #include <pj/sock_qos.h>
 
@@ -197,6 +198,11 @@ typedef struct pj_stun_sock_info
     pj_sockaddr	    mapped_addr;
 
     /**
+     * The local address of the socket.
+     */
+    pj_sockaddr	    local_addr;
+
+    /**
      * Number of interface address aliases. The interface address aliases
      * are list of all interface addresses in this host.
      */
@@ -218,7 +224,17 @@ typedef struct pj_stun_sock_info
 typedef struct pj_stun_sock_cfg
 {
     /**
-     * Packet buffer size. Default value is PJ_STUN_SOCK_PKT_LEN.
+     * The group lock to be used by the STUN socket. If NULL, the STUN socket
+     * will create one internally.
+     *
+     * Default: NULL
+     */
+    pj_grp_lock_t *grp_lock;
+
+    /**
+     * Packet buffer size.
+     *
+     * Default value is PJ_STUN_SOCK_PKT_LEN.
      */
     unsigned max_pkt_size;
 
@@ -273,6 +289,18 @@ typedef struct pj_stun_sock_cfg
      * Default: PJ_TRUE
      */
     pj_bool_t qos_ignore_error;
+
+	/**
+	 * Buffer size for socket receive data.
+     *
+     */
+	int sock_recv_buf_size;
+
+	/**
+	 * Buffer size for socket send data.
+     *
+     */
+	int sock_send_buf_size;
 
 } pj_stun_sock_cfg;
 
@@ -393,6 +421,16 @@ PJ_DECL(void*) pj_stun_sock_get_user_data(pj_stun_sock *stun_sock);
 
 
 /**
+ * Get the group lock for this STUN transport.
+ *
+ * @param stun_sock	The STUN transport instance.
+ *
+ * @return	        The group lock.
+ */
+PJ_DECL(pj_grp_lock_t *) pj_stun_sock_get_grp_lock(pj_stun_sock *stun_sock);
+
+
+/**
  * Get the STUN transport info. The transport info contains, among other
  * things, the allocated relay address.
  *
@@ -434,6 +472,13 @@ PJ_DECL(pj_status_t) pj_stun_sock_sendto(pj_stun_sock *stun_sock,
 					 const pj_sockaddr_t *dst_addr,
 					 unsigned addr_len);
 
+PJ_DECL(pj_sockaddr*) pj_stun_sock_get_mapped_addr(pj_stun_sock *stun_sock);
+
+PJ_DECL(pj_sockaddr*) pj_stun_sock_get_previous_local_addr(pj_stun_sock *stun_sock);
+
+PJ_DECL(void) pj_stun_sock_set_previous_local_addr(pj_stun_sock *stun_sock, pj_sockaddr* local_addr);
+
+PJ_DECL(int) pj_stun_sock_get_addr_family(pj_stun_sock *stun_sock);
 /**
  * @}
  */

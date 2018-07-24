@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: config.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -220,6 +220,34 @@
 #   define PJ_TURN_KEEP_ALIVE_SEC		    15
 #endif
 
+/* **************************************************************************
+ * TCP TRANSPORT CONFIGURATION
+ */
+
+/**
+ * Maximum TCP packet size to be supported.
+ */
+#ifndef PJ_TCP_MAX_PKT_LEN
+#   define PJ_TCP_MAX_PKT_LEN			    3000
+#endif
+
+/**
+ * Maximum DNS SRV entries to be processed in the DNS SRV response
+ */
+#ifndef PJ_TCP_MAX_DNS_SRV_CNT
+#   define PJ_TCP_MAX_DNS_SRV_CNT		    4
+#endif
+
+
+/**
+ * The TCP session timer heart beat interval. When this timer occurs, the 
+ * TCP session will scan all the connected session to see which
+ * need to be refreshed.
+ */
+#ifndef PJ_TCP_KEEP_ALIVE_SEC
+#   define PJ_TCP_KEEP_ALIVE_SEC		    30
+#endif
+
 
 /* **************************************************************************
  * ICE CONFIGURATION
@@ -363,7 +391,16 @@
  * Default: 4*PJ_STUN_RTO_VALUE (milliseconds)
  */
 #ifndef PJ_ICE_NOMINATED_CHECK_DELAY
-#   define PJ_ICE_NOMINATED_CHECK_DELAY		    (4*PJ_STUN_RTO_VALUE)
+#   define PJ_ICE_NOMINATED_CHECK_DELAY		    (15*PJ_STUN_RTO_VALUE)
+/**
+ * if router is PPPoE, the TCP will take more time, so we need extend the delay time
+ * Andrew Hung (2013/02/21)
+ * set to original value
+ * Dean Li (2013/10/22)
+ * set to to 10*PJ_STUN_RTO_VALUE again
+ * Dean Li (2013/12/29)
+ */
+//#   define PJ_ICE_NOMINATED_CHECK_DELAY		    (15*PJ_STUN_RTO_VALUE)
 #endif
 
 
@@ -485,6 +522,26 @@
 /** TURN socket pool increment size */
 #ifndef PJNATH_POOL_INC_TURN_SOCK
 #   define PJNATH_POOL_INC_TURN_SOCK		    1000
+#endif
+
+/** TCP session initial pool size */
+#ifndef PJNATH_POOL_LEN_TCP_SESS
+#   define PJNATH_POOL_LEN_TCP_SESS		    1000
+#endif
+
+/** TCP session pool increment size */
+#ifndef PJNATH_POOL_INC_TCP_SESS
+#   define PJNATH_POOL_INC_TCP_SESS		    1000
+#endif
+
+/** TCP socket initial pool size */
+#ifndef PJNATH_POOL_LEN_TCP_SOCK
+#   define PJNATH_POOL_LEN_TCP_SOCK		    1000
+#endif
+
+/** TCP socket pool increment size */
+#ifndef PJNATH_POOL_INC_TCP_SOCK
+#   define PJNATH_POOL_INC_TCP_SOCK		    1000
 #endif
 
 /**

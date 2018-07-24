@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: array.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -65,7 +65,8 @@ PJ_DEF(pj_status_t) pj_array_find( const void *array,
 	    return PJ_SUCCESS;
 	}
 	char_array += elem_size;
-    }
+	}
+	printf("pj_array_find() array not found.\n");
     return PJ_ENOTFOUND;
 }
 

@@ -6,7 +6,7 @@
 	>
 	<Tool
 		Name="VCCLCompilerTool"
-		PreprocessorDefinitions="WIN32;PJ_WIN32=1;PJ_M_I386=1;"
+		PreprocessorDefinitions="WIN32;PJ_WIN32=1;_X86_;PJ_M_I386"
 	/>
 	<Tool
 		Name="VCLinkerTool"
@@ -15,6 +15,6 @@
 	/>
 	<UserMacro
 		Name="TargetCPU"
-		Value="i386"
+		Value="x86"
 	/>
 </VisualStudioPropertySheet>

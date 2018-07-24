@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sock_select.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -43,7 +43,7 @@
 PJ_DEF(void) PJ_FD_ZERO(pj_fd_set_t *fdsetp)
 {
     PJ_CHECK_STACK();
-    pj_assert(sizeof(pj_fd_set_t)-sizeof(pj_sock_t) >= sizeof(fd_set));
+    //pj_assert(sizeof(pj_fd_set_t)-sizeof(pj_sock_t) >= sizeof(fd_set));
 
     FD_ZERO(PART_FDSET(fdsetp));
     PART_COUNT(fdsetp) = 0;
@@ -100,8 +100,18 @@ PJ_DEF(int) pj_sock_select( int n,
                      PJ_EBUG);
 
     if (timeout) {
-	os_timeout.tv_sec = timeout->sec;
-	os_timeout.tv_usec = timeout->msec * 1000;
+		// natnl if timeout value is 0, forcely assign 1 usec as timeout to avoid cpu usage.
+		if (timeout->sec == timeout->msec && timeout->msec == 0) {
+			os_timeout.tv_sec = timeout->sec;
+#if 1
+			os_timeout.tv_usec = 1;
+#else
+			os_timeout.tv_usec = 0;
+#endif
+		} else {
+			os_timeout.tv_sec = timeout->sec;
+			os_timeout.tv_usec = timeout->msec * 1000;
+		}
 	p_os_timeout = &os_timeout;
     } else {
 	p_os_timeout = NULL;

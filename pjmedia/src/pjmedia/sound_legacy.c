@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sound_legacy.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -54,12 +54,12 @@ PJ_DEF(pj_status_t) pjmedia_snd_init(pj_pool_factory *factory)
     return pjmedia_aud_subsys_init(factory);
 }
 
-PJ_DEF(pj_status_t) pjmedia_snd_deinit(void)
+PJ_DEF(pj_status_t) pjmedia_snd_deinit()
 {
     return pjmedia_aud_subsys_shutdown();
 }
 
-PJ_DEF(int) pjmedia_snd_get_dev_count(void)
+PJ_DEF(int) pjmedia_snd_get_dev_count()
 {
     return pjmedia_aud_dev_count();
 }
@@ -161,7 +161,7 @@ static pj_status_t open_stream( pjmedia_dir dir,
     snd_strm->user_user_data = user_data;
 
     /* Create the stream */
-    status = pjmedia_aud_stream_create(&param, &snd_rec_cb, 
+    status = pjmedia_aud_stream_create(&param, &snd_rec_cb,
 				       &snd_play_cb, snd_strm,
 				       &snd_strm->aud_strm);
     if (status != PJ_SUCCESS) {
@@ -197,7 +197,7 @@ PJ_DEF(pj_status_t) pjmedia_snd_open_player( int index,
 					void *user_data,
 					pjmedia_snd_stream **p_snd_strm )
 {
-    return open_stream(PJMEDIA_DIR_PLAYBACK, PJMEDIA_AUD_INVALID_DEV, index, 
+    return open_stream(PJMEDIA_DIR_PLAYBACK, PJMEDIA_AUD_INVALID_DEV, index,
 		       clock_rate, channel_count, samples_per_frame,
 		       bits_per_sample, NULL, play_cb,
 		       user_data, p_snd_strm);

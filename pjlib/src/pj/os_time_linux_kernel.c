@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_time_linux_kernel.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -29,6 +29,17 @@ PJ_DEF(pj_status_t) pj_gettimeofday(pj_time_val *tv)
     do_gettimeofday(&tval);
     tv->sec = tval.tv_sec;
     tv->msec = tval.tv_usec / 1000;
+
+    return 0;
+}
+
+PJ_DEF(pj_status_t) pj_gettimeofday2(pj_time_val2 *tv)
+{
+    struct timeval tval;
+  
+    do_gettimeofday(&tval);
+    tv->sec = tval.tv_sec;
+    tv->usec = tval.tv_usec;
 
     return 0;
 }

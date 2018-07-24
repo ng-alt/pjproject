@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_msg_dump.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -274,9 +274,9 @@ PJ_DEF(char*) pj_stun_msg_dump(const pj_stun_msg *msg,
 			   " Attributes:\n",
 			   msg->hdr.length,
 			   msg->hdr.magic,
-			   *(pj_uint32_t*)&msg->hdr.tsx_id[0],
-			   *(pj_uint32_t*)&msg->hdr.tsx_id[4],
-			   *(pj_uint32_t*)&msg->hdr.tsx_id[8]);
+			   pj_ntohl(*(pj_uint32_t*)&msg->hdr.tsx_id[0]),
+			   pj_ntohl(*(pj_uint32_t*)&msg->hdr.tsx_id[4]),
+			   pj_ntohl(*(pj_uint32_t*)&msg->hdr.tsx_id[8]));
     APPLY();
 
     for (i=0; i<msg->attr_count; ++i) {

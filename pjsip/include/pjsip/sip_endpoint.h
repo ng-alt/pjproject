@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_endpoint.h 3988 2012-03-28 07:32:42Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -36,6 +36,8 @@
 
 PJ_BEGIN_DECL
 
+typedef void pjsip_endpt_tunnel_callback(pjsip_endpoint *endpt);
+
 /**
  * @defgroup PJSIP_ENDPT Endpoint
  * @ingroup PJSIP_CORE_CORE
@@ -62,6 +64,13 @@ PJ_BEGIN_DECL
  * @{
  */
 
+
+/**
+ * Type of callback to register to pjsip_endpt_atexit().
+ */
+typedef void (*pjsip_endpt_exit_callback)(pjsip_endpoint *endpt);
+
+
 /**
  * Create an instance of SIP endpoint from the specified pool factory.
  * The pool factory reference then will be kept by the endpoint, so that 
@@ -78,8 +87,8 @@ PJ_BEGIN_DECL
  * @return              PJ_SUCCESS on success.
  */
 PJ_DECL(pj_status_t) pjsip_endpt_create(pj_pool_factory *pf,
-					const char *name,
-                                        pjsip_endpoint **endpt);
+									   const char *name,
+									   pjsip_endpoint **p_endpt);
 
 /**
  * Destroy endpoint instance. Application must make sure that all pending
@@ -131,6 +140,24 @@ PJ_DECL(pj_status_t) pjsip_endpt_handle_events( pjsip_endpoint *endpt,
 PJ_DECL(pj_status_t) pjsip_endpt_handle_events2(pjsip_endpoint *endpt,
 					        const pj_time_val *max_timeout,
 					        unsigned *count);
+
+/**
+ * Handle events with additional info about number of events that
+ * have been handled.
+ *
+ * @param endpt		The endpoint.
+ * @param max_timeout	Maximum time to wait for events, or NULL to wait forever
+ *			until event is received.
+ * @param count		Optional argument to receive the number of events that
+ *			have been handled by the function.
+ * @param force_use_max_timeout		Optional argument to force to use max timeout value.
+ *
+ * @return		PJ_SUCCESS on success.
+ */
+PJ_DEF(pj_status_t) pjsip_endpt_handle_events3(pjsip_endpoint *endpt,
+											   const pj_time_val *max_timeout,
+											   unsigned *p_count,
+											   int force_use_max_timeout);
 /**
  * Schedule timer to endpoint's timer heap. Application must poll the endpoint
  * periodically (by calling #pjsip_endpt_handle_events) to ensure that the
@@ -498,6 +525,26 @@ PJ_DECL(pj_status_t) pjsip_endpt_add_capability( pjsip_endpoint *endpt,
  */
 PJ_DECL(const pjsip_hdr*) pjsip_endpt_get_request_headers(pjsip_endpoint *e);
 
+/**
+ * Set instance id of pjsua.
+ * Currently only Max-Forwards are defined.
+ *
+ * @param endpt	    The endpoint.
+ * @param inst_id	    The instance id of pjsua.
+ *
+ * @return	    List of headers.
+ */
+PJ_DEF(void) pjsip_endpt_set_inst_id(pjsip_endpoint *endpt, int inst_id);
+
+/**
+ * Get instance id of pjsua.
+ * Currently only Max-Forwards are defined.
+ *
+ * @param endpt	    The endpoint.
+ *
+ * @return	    List of headers.
+ */
+PJ_DEF(int) pjsip_endpt_get_inst_id(pjsip_endpoint *endpt);
 
 /**
  * Dump endpoint status to the log. This will print the status to the log
@@ -510,6 +557,21 @@ PJ_DECL(const pjsip_hdr*) pjsip_endpt_get_request_headers(pjsip_endpoint *e);
  */
 PJ_DECL(void) pjsip_endpt_dump( pjsip_endpoint *endpt, pj_bool_t detail );
 
+
+/**
+ * Register cleanup function to be called by SIP endpoint when 
+ * #pjsip_endpt_destroy() is called.  Note that application should not
+ * use or access any endpoint resource (such as pool, ioqueue, timer heap)
+ * from within the callback as such resource may have been released when
+ * the callback function is invoked.
+ *
+ * @param endpt		The SIP endpoint.
+ * @param func		The function to be registered.
+ *
+ * @return		PJ_SUCCESS on success.
+ */
+PJ_DECL(pj_status_t) pjsip_endpt_atexit(pjsip_endpoint *endpt,
+					pjsip_endpt_exit_callback func);
 
 
 /**
@@ -543,6 +605,61 @@ PJ_DECL(void) pjsip_endpt_log_error( pjsip_endpoint *endpt,
  * to be processed later.
  */
 void pjsip_endpt_send_tsx_event( pjsip_endpoint *endpt, pjsip_event *evt );
+
+
+PJ_DEF(void *) pjsip_endpt_get_tunnel( pjsip_endpoint *endpt, int call_id);
+
+/* Andrew Added */
+PJ_DEF(void) pjsip_endpt_register_tunnel( pjsip_endpoint *endpt, int call_id, 
+										 void *tunnel/*, pjsip_endpt_tunnel_callback *cb */);
+
+/* Andrew Added */
+PJ_DEF(void) pjsip_endpt_unregister_tunnel( pjsip_endpoint *endpt, int call_id, void *tunnel );
+
+#if 0
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_userid( pjsip_endpoint *endpt, int call_id, char *user_id, int user_id_len );
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_userid( pjsip_endpoint *endpt, int call_id, char *user_id);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_userid( pjsip_endpoint *endpt, int call_id, char *user_id, int user_id_len );
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_userid( pjsip_endpoint *endpt, int call_id, char *user_id);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_deviceid( pjsip_endpoint *endpt, char *device_id, int user_id_len );
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_deviceid( pjsip_endpoint *endpt, char *device_id);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_deviceid( pjsip_endpoint *endpt, int call_id, char *device_id, int device_id_len );
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_deviceid( pjsip_endpoint *endpt, int call_id, char *device_id);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_turnsvr( pjsip_endpoint *endpt, char *turn_server);
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_turnsvr( pjsip_endpoint *endpt, char *turn_server, int turn_server_len);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_turnsvr( pjsip_endpoint *endpt, int call_id, char *turn_server, int turn_server_len);
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_turnsvr( pjsip_endpoint *endpt, int call_id, char *turn_server);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_local_turnpwd( pjsip_endpoint *endpt, char *turn_pwd, int turn_pwd_len );
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_local_turnpwd( pjsip_endpoint *endpt, char *turn_pwd);
+
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_set_remote_turnpwd( pjsip_endpoint *endpt, int call_id, char *turn_pwd, int turn_pwd_lent );
+/* Dean Added */
+PJ_DEF(void) pjsip_endpt_get_remote_turnpwd( pjsip_endpoint *endpt, int call_id, char *turn_pwd);
+
+#endif
+PJ_DECL(pj_pool_t *) pjsip_endpt_get_pool( pjsip_endpoint *endpt);
+
 
 PJ_END_DECL
 

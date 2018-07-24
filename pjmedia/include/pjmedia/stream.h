@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stream.h 3571 2011-05-19 08:05:23Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -393,6 +393,31 @@ pjmedia_stream_send_rtcp_sdes( pjmedia_stream *stream );
  */
 PJ_DECL(pj_status_t)
 pjmedia_stream_send_rtcp_bye( pjmedia_stream *stream );
+
+#if 0 // 2013-10-20 DEAN, deprecated
+PJ_DECL(pj_status_t) pjmedia_stream_set_nsmd_callback(pjmedia_stream *stream, 
+													 void (*cb)(int call_id));
+#endif
+
+/**
+ * Check if the recv buffer is full or not.
+ *
+ * @param stream	The media stream.
+ *
+ * @return		PJ_TRUE : The recv buffer is full, can't hold data any more.
+ */
+PJ_DECL(pj_bool_t) pjmedia_stream_rbuff_full(pjmedia_stream *stream);
+
+/**
+ * Check if the speed limit reached.
+ *
+ * @param stream	The media stream.
+ * @param data_len	The current length of data.
+ *
+ * @return		PJ_TRUE : The speed limit reached.
+ */
+PJ_DECL(pj_bool_t) pjmedia_stream_speed_limit_reached(pjmedia_stream *stream, int data_len);
+
 
 /**
  * @}

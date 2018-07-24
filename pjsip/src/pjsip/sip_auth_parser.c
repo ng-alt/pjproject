@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_auth_parser.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -124,11 +124,10 @@ static void parse_digest_credential( pj_scanner *scanner, pj_pool_t *pool,
 static void parse_pgp_credential( pj_scanner *scanner, pj_pool_t *pool, 
                                   pjsip_pgp_credential *cred)
 {
-    PJ_UNUSED_ARG(scanner);
     PJ_UNUSED_ARG(pool);
     PJ_UNUSED_ARG(cred);
 
-    PJ_THROW(PJSIP_SYN_ERR_EXCEPTION);
+    PJ_THROW(scanner->inst_id, PJSIP_SYN_ERR_EXCEPTION[scanner->inst_id]);
 }
 
 static void parse_digest_challenge( pj_scanner *scanner, pj_pool_t *pool, 
@@ -186,11 +185,10 @@ static void parse_digest_challenge( pj_scanner *scanner, pj_pool_t *pool,
 static void parse_pgp_challenge( pj_scanner *scanner, pj_pool_t *pool, 
                                  pjsip_pgp_challenge *chal)
 {
-    PJ_UNUSED_ARG(scanner);
     PJ_UNUSED_ARG(pool);
     PJ_UNUSED_ARG(chal);
 
-    PJ_THROW(PJSIP_SYN_ERR_EXCEPTION);
+    PJ_THROW(scanner->inst_id, PJSIP_SYN_ERR_EXCEPTION[scanner->inst_id]);
 }
 
 static void int_parse_hdr_authorization( pj_scanner *scanner, pj_pool_t *pool,
@@ -215,7 +213,7 @@ static void int_parse_hdr_authorization( pj_scanner *scanner, pj_pool_t *pool,
 	parse_pgp_credential( scanner, pool, &hdr->credential.pgp);
 
     } else {
-	PJ_THROW(PJSIP_SYN_ERR_EXCEPTION);
+	PJ_THROW(scanner->inst_id, PJSIP_SYN_ERR_EXCEPTION[scanner->inst_id]);
     }
 
     pjsip_parse_end_hdr_imp( scanner );
@@ -243,7 +241,7 @@ static void int_parse_hdr_authenticate( pj_scanner *scanner, pj_pool_t *pool,
 	parse_pgp_challenge(scanner, pool, &hdr->challenge.pgp);
 
     } else {
-	PJ_THROW(PJSIP_SYN_ERR_EXCEPTION);
+	PJ_THROW(scanner->inst_id, PJSIP_SYN_ERR_EXCEPTION[scanner->inst_id]);
     }
 
     pjsip_parse_end_hdr_imp( scanner );
@@ -254,6 +252,7 @@ static pjsip_hdr* parse_hdr_authorization( pjsip_parse_ctx *ctx )
 {
     pjsip_authorization_hdr *hdr = pjsip_authorization_hdr_create(ctx->pool);
     int_parse_hdr_authorization(ctx->scanner, ctx->pool, hdr);
+
     return (pjsip_hdr*)hdr;
 }
 
@@ -261,7 +260,8 @@ static pjsip_hdr* parse_hdr_proxy_authorization( pjsip_parse_ctx *ctx )
 {
     pjsip_proxy_authorization_hdr *hdr = 
         pjsip_proxy_authorization_hdr_create(ctx->pool);
-    int_parse_hdr_authorization(ctx->scanner, ctx->pool, hdr);
+	int_parse_hdr_authorization(ctx->scanner, ctx->pool, hdr);
+
     return (pjsip_hdr*)hdr;
 }
 
@@ -270,6 +270,7 @@ static pjsip_hdr* parse_hdr_www_authenticate( pjsip_parse_ctx *ctx )
     pjsip_www_authenticate_hdr *hdr = 
         pjsip_www_authenticate_hdr_create(ctx->pool);
     int_parse_hdr_authenticate(ctx->scanner, ctx->pool, hdr);
+
     return (pjsip_hdr*)hdr;
 }
 
@@ -277,25 +278,26 @@ static pjsip_hdr* parse_hdr_proxy_authenticate( pjsip_parse_ctx *ctx )
 {
     pjsip_proxy_authenticate_hdr *hdr = 
         pjsip_proxy_authenticate_hdr_create(ctx->pool);
-    int_parse_hdr_authenticate(ctx->scanner, ctx->pool, hdr);
+	int_parse_hdr_authenticate(ctx->scanner, ctx->pool, hdr);
+
     return (pjsip_hdr*)hdr;
 }
 
 
-PJ_DEF(pj_status_t) pjsip_auth_init_parser()
+PJ_DEF(pj_status_t) pjsip_auth_init_parser(int inst_id)
 {
     pj_status_t status;
 
-    status = pjsip_register_hdr_parser( "Authorization", NULL, 
+    status = pjsip_register_hdr_parser( inst_id, "Authorization", NULL, 
                                         &parse_hdr_authorization);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, status);
-    status = pjsip_register_hdr_parser( "Proxy-Authorization", NULL, 
+    status = pjsip_register_hdr_parser( inst_id, "Proxy-Authorization", NULL, 
                                         &parse_hdr_proxy_authorization);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, status);
-    status = pjsip_register_hdr_parser( "WWW-Authenticate", NULL, 
+    status = pjsip_register_hdr_parser( inst_id, "WWW-Authenticate", NULL, 
                                         &parse_hdr_www_authenticate);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, status);
-    status = pjsip_register_hdr_parser( "Proxy-Authenticate", NULL, 
+    status = pjsip_register_hdr_parser( inst_id, "Proxy-Authenticate", NULL, 
                                         &parse_hdr_proxy_authenticate);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, status);
 

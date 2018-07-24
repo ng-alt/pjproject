@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_resolve.c 4103 2012-04-26 23:42:27Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -263,8 +263,14 @@ PJ_DEF(void) pjsip_resolve( pjsip_resolver_t *resolver,
 	    /* Resolve */
 	    count = 1;
 	    status = pj_getaddrinfo(af, &target->addr.host, &count, &ai);
-	    if (status != PJ_SUCCESS)
+	    if (status != PJ_SUCCESS) {
+		/* "Normalize" error to PJ_ERESOLVE. This is a special error
+		 * because it will be translated to SIP status 502 by
+		 * sip_transaction.c
+		 */
+		status = PJ_ERESOLVE;
 		goto on_error;
+	    }
 
 	    svr_addr.entry[0].addr.addr.sa_family = (pj_uint16_t)af;
 	    pj_memcpy(&svr_addr.entry[0].addr, &ai.ai_addr,
@@ -296,8 +302,8 @@ PJ_DEF(void) pjsip_resolve( pjsip_resolver_t *resolver,
 	svr_addr.entry[0].priority = 0;
 	svr_addr.entry[0].weight = 0;
 	svr_addr.entry[0].type = type;
-	svr_addr.entry[0].addr_len = pj_sockaddr_get_len(&svr_addr.entry[0].addr);
-	(*cb)(status, token, &svr_addr);
+    	svr_addr.entry[0].addr_len = pj_sockaddr_get_len(&svr_addr.entry[0].addr);
+	(*cb)(status, token, &svr_addr, target->addr.port);
 
 	/* Done. */
 	return;
@@ -406,7 +412,7 @@ on_error:
 			     target->addr.host.ptr,
 			     status,
 			     pj_strerror(status,errmsg,sizeof(errmsg)).ptr));
-	(*cb)(status, token, NULL);
+	(*cb)(status, token, NULL,  target->addr.port);
 	return;
     }
 }
@@ -441,7 +447,7 @@ static void dns_a_callback(void *user_data,
 		  errmsg));
 
 	/* Call the callback */
-	(*query->cb)(status, query->token, NULL);
+	(*query->cb)(status, query->token, NULL, query->req.def_port);
 	return;
     }
 
@@ -461,7 +467,7 @@ static void dns_a_callback(void *user_data,
     }
 
     /* Call the callback */
-    (*query->cb)(PJ_SUCCESS, query->token, &srv);
+    (*query->cb)(PJ_SUCCESS, query->token, &srv, query->req.def_port);
 }
 
 
@@ -483,7 +489,7 @@ static void srv_resolver_cb(void *user_data,
 		  errmsg));
 
 	/* Call the callback */
-	(*query->cb)(status, query->token, NULL);
+	(*query->cb)(status, query->token, NULL, query->req.def_port);
 	return;
     }
 
@@ -507,7 +513,7 @@ static void srv_resolver_cb(void *user_data,
     }
 
     /* Call the callback */
-    (*query->cb)(PJ_SUCCESS, query->token, &srv);
+    (*query->cb)(PJ_SUCCESS, query->token, &srv, query->req.def_port);
 }
 
 #endif	/* PJSIP_HAS_RESOLVER */

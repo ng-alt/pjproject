@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_core_unix.c 3986 2012-03-22 11:29:20Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -38,9 +38,13 @@
 #if defined(PJ_HAS_SEMAPHORE_H) && PJ_HAS_SEMAPHORE_H != 0
 #  include <semaphore.h>
 #endif
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+#include <dispatch/dispatch.h>
+#endif
 
 #include <unistd.h>	    // getpid()
 #include <errno.h>	    // errno
+#include <sys/syscall.h>
 
 #include <pthread.h>
 
@@ -67,6 +71,7 @@ struct pj_thread_t
     const char	   *caller_file;
     int		    caller_line;
 #endif
+	int         inst_id;
 };
 
 struct pj_atomic_t
@@ -84,68 +89,104 @@ struct pj_mutex_t
     pj_thread_t	       *owner;
     char		owner_name[PJ_MAX_OBJ_NAME];
 #endif
+	int         inst_id;
 };
 
 #if defined(PJ_HAS_SEMAPHORE) && PJ_HAS_SEMAPHORE != 0
 struct pj_sem_t
 {
-    sem_t	       *sem;
-    char		obj_name[PJ_MAX_OBJ_NAME];
+	int inst_id;
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+	dispatch_semaphore_t sem;			
+#else
+    	sem_t	       *sem;
+#endif
+    	char		obj_name[PJ_MAX_OBJ_NAME];
 };
 #endif /* PJ_HAS_SEMAPHORE */
 
 #if defined(PJ_HAS_EVENT_OBJ) && PJ_HAS_EVENT_OBJ != 0
 struct pj_event_t
 {
+	int inst_id;
     char		obj_name[PJ_MAX_OBJ_NAME];
 };
 #endif	/* PJ_HAS_EVENT_OBJ */
 
 
+/*
+ * Flag and reference counter for PJLIB instance.
+ */
+static int initialized[PJSUA_MAX_INSTANCES];
+
 #if PJ_HAS_THREADS
-    static pj_thread_t main_thread;
-    static long thread_tls_id;
-    static pj_mutex_t critical_section;
+    static pj_thread_t main_thread[PJSUA_MAX_INSTANCES];
+    static long thread_tls_id[PJSUA_MAX_INSTANCES];
+    static pj_mutex_t critical_section[PJSUA_MAX_INSTANCES];
 #else
 #   define MAX_THREADS 32
-    static int tls_flag[MAX_THREADS];
-    static void *tls[MAX_THREADS];
+    static int tls_flag[PJSUA_MAX_INSTANCES][MAX_THREADS];
+    static void *tls[PJSUA_MAX_INSTANCES][MAX_THREADS];
 #endif
 
-static unsigned atexit_count;
-static void (*atexit_func[32])(void);
+static unsigned atexit_count[PJSUA_MAX_INSTANCES];
+static void (*atexit_func[PJSUA_MAX_INSTANCES][32])(int inst_id);
 
-static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name, int type);
+static int is_initialized;
 
+static pj_status_t init_mutex(int inst_id, pj_mutex_t *mutex, const char *name, int type);
+
+
+static void thread_tls_id_initialize()
+{
+	int i;
+	if(is_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(thread_tls_id); i++)
+	{
+		thread_tls_id[i] = -1;
+	}
+
+	is_initialized = 1;
+}
 /*
  * pj_init(void).
  * Init PJLIB!
  */
-PJ_DEF(pj_status_t) pj_init(void)
+PJ_DEF(pj_status_t) pj_init(int inst_id)
 {
     char dummy_guid[PJ_GUID_MAX_LENGTH];
     pj_str_t guid;
-    pj_status_t rc;
+	pj_status_t rc;
+
+	thread_tls_id_initialize();
+
+    /* Check if PJLIB have been initialized */
+    if (initialized[inst_id]) {
+	++initialized[inst_id];
+	return PJ_SUCCESS;
+    }
 
 #if PJ_HAS_THREADS
     /* Init this thread's TLS. */
-    if ((rc=pj_thread_init()) != 0) {
+    if ((rc=pj_thread_init(inst_id)) != 0) {
 	return rc;
     }
 
     /* Critical section. */
-    if ((rc=init_mutex(&critical_section, "critsec", PJ_MUTEX_RECURSE)) != 0)
+    if ((rc=init_mutex(inst_id, &critical_section[inst_id], "critsec", PJ_MUTEX_RECURSE)) != 0)
 	return rc;
 
 #endif
 
     /* Init logging */
-    pj_log_init();
+    pj_log_init(inst_id);
 
     /* Initialize exception ID for the pool. 
      * Must do so after critical section is configured.
      */
-    rc = pj_exception_id_alloc("PJLIB/No memory", &PJ_NO_MEMORY_EXCEPTION);
+    rc = pj_exception_id_alloc(inst_id, "PJLIB/No memory", &PJ_NO_MEMORY_EXCEPTION);
     if (rc != PJ_SUCCESS)
         return rc;
     
@@ -155,7 +196,7 @@ PJ_DEF(pj_status_t) pj_init(void)
 
     /* Startup GUID. */
     guid.ptr = dummy_guid;
-    pj_generate_unique_string( &guid );
+    pj_generate_unique_string( inst_id, &guid );
 
     /* Startup timestamp */
 #if defined(PJ_HAS_HIGH_RES_TIMER) && PJ_HAS_HIGH_RES_TIMER != 0
@@ -167,6 +208,10 @@ PJ_DEF(pj_status_t) pj_init(void)
     }
 #endif   
 
+    /* Flag PJLIB as initialized */
+    ++initialized[inst_id];
+    pj_assert(initialized[inst_id] == 1);
+
     PJ_LOG(4,(THIS_FILE, "pjlib %s for POSIX initialized",
 	      PJ_VERSION));
 
@@ -176,46 +221,51 @@ PJ_DEF(pj_status_t) pj_init(void)
 /*
  * pj_atexit()
  */
-PJ_DEF(pj_status_t) pj_atexit(void (*func)(void))
+PJ_DEF(pj_status_t) pj_atexit(int inst_id, void (*func)(int inst_id))
 {
-    if (atexit_count >= PJ_ARRAY_SIZE(atexit_func))
+    if (atexit_count[inst_id]  >= PJ_ARRAY_SIZE(atexit_func))
 	return PJ_ETOOMANY;
 
-    atexit_func[atexit_count++] = func;
+    atexit_func[inst_id][atexit_count[inst_id]++] = func;
     return PJ_SUCCESS;
 }
 
 /*
  * pj_shutdown(void)
  */
-PJ_DEF(void) pj_shutdown()
+PJ_DEF(void) pj_shutdown(int inst_id)
 {
     int i;
 
+    /* Only perform shutdown operation when 'initialized' reaches zero */
+    pj_assert(initialized[inst_id] > 0);
+    if (--initialized[inst_id] != 0)
+	return;
+
     /* Call atexit() functions */
-    for (i=atexit_count-1; i>=0; --i) {
-	(*atexit_func[i])();
+    for (i=atexit_count[inst_id]-1; i>=0; --i) {
+	(*atexit_func[inst_id][i])(inst_id);
     }
-    atexit_count = 0;
+    atexit_count[inst_id] = 0;
 
     /* Free exception ID */
     if (PJ_NO_MEMORY_EXCEPTION != -1) {
-	pj_exception_id_free(PJ_NO_MEMORY_EXCEPTION);
+	pj_exception_id_free(inst_id, PJ_NO_MEMORY_EXCEPTION);
 	PJ_NO_MEMORY_EXCEPTION = -1;
     }
 
 #if PJ_HAS_THREADS
     /* Destroy PJLIB critical section */
-    pj_mutex_destroy(&critical_section);
+    pj_mutex_destroy(&critical_section[inst_id]);
 
     /* Free PJLIB TLS */
-    if (thread_tls_id != -1) {
-	pj_thread_local_free(thread_tls_id);
-	thread_tls_id = -1;
+    if (thread_tls_id[inst_id] != -1) {
+	pj_thread_local_free(thread_tls_id[inst_id]);
+	thread_tls_id[inst_id] = -1;
     }
 
     /* Ticket #1132: Assertion when (re)starting PJLIB on different thread */
-    pj_bzero(&main_thread, sizeof(main_thread));
+    pj_bzero(&main_thread[inst_id], sizeof(main_thread[inst_id]));
 #endif
 
     /* Clear static variables */
@@ -232,13 +282,29 @@ PJ_DEF(pj_uint32_t) pj_getpid(void)
     return getpid();
 }
 
+
+/*
+ * pj_gettid(void)
+ */
+PJ_DEF(pj_uint32_t) pj_gettid(void)
+{
+    PJ_CHECK_STACK();
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+    //return pthread_mach_thread_np(pthread_self());
+#elif defined(PJ_ANDROID) && PJ_ANDROID!=0
+	return gettid();
+#else
+	return syscall (SYS_gettid);
+#endif
+}
+
 /*
  * Check if this thread has been registered to PJLIB.
  */
-PJ_DEF(pj_bool_t) pj_thread_is_registered(void)
+PJ_DEF(pj_bool_t) pj_thread_is_registered(int inst_id)
 {
 #if PJ_HAS_THREADS
-    return pj_thread_local_get(thread_tls_id) != 0;
+    return pj_thread_local_get(thread_tls_id[inst_id]) != 0;
 #else
     pj_assert("pj_thread_is_registered() called in non-threading mode!");
     return PJ_TRUE;
@@ -363,10 +429,16 @@ PJ_DEF(void*) pj_thread_get_os_handle(pj_thread_t *thread)
 #endif
 }
 
+PJ_DEF(void*) pj_thread_get_thread_id(pj_thread_t *thread)
+{
+	return pj_thread_get_os_handle(thread);
+}
+
 /*
  * pj_thread_register(..)
  */
-PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
+PJ_DEF(pj_status_t) pj_thread_register ( int inst_id,
+					 const char *cstr_thread_name,
 					 pj_thread_desc desc,
 					 pj_thread_t **ptr_thread)
 {
@@ -383,7 +455,7 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
     }
 
     /* Warn if this thread has been registered before */
-    if (pj_thread_local_get (thread_tls_id) != 0) {
+    if (pj_thread_local_get (thread_tls_id[inst_id]) != 0) {
 	// 2006-02-26 bennylp:
 	//  This wouldn't work in all cases!.
 	//  If thread is created by external module (e.g. sound thread),
@@ -392,7 +464,8 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
 	//*thread_ptr = (pj_thread_t*)pj_thread_local_get (thread_tls_id);
         //return PJ_SUCCESS;
 	PJ_LOG(4,(THIS_FILE, "Info: possibly re-registering existing "
-			     "thread"));
+		"thread"));
+	return PJ_SUCCESS;
     }
 
     /* On the other hand, also warn if the thread descriptor buffer seem to
@@ -415,7 +488,7 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
 	pj_ansi_snprintf(thread->obj_name, sizeof(thread->obj_name), 
 			 "thr%p", (void*)thread->thread);
     
-    rc = pj_thread_local_set(thread_tls_id, thread);
+    rc = pj_thread_local_set(thread_tls_id[inst_id], thread);
     if (rc != PJ_SUCCESS) {
 	pj_bzero(desc, sizeof(struct pj_thread_t));
 	return rc;
@@ -441,17 +514,17 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
 /*
  * pj_thread_init(void)
  */
-pj_status_t pj_thread_init(void)
+pj_status_t pj_thread_init(int inst_id)
 {
 #if PJ_HAS_THREADS
     pj_status_t rc;
     pj_thread_t *dummy;
 
-    rc = pj_thread_local_alloc(&thread_tls_id );
+    rc = pj_thread_local_alloc(&thread_tls_id[inst_id] );
     if (rc != PJ_SUCCESS) {
 	return rc;
     }
-    return pj_thread_register("thr%p", (long*)&main_thread, &dummy);
+    return pj_thread_register(inst_id, "thr%p", (long*)&main_thread[inst_id], &dummy);
 #else
     PJ_LOG(2,(THIS_FILE, "Thread init error. Threading is not enabled!"));
     return PJ_EINVALIDOP;
@@ -475,7 +548,7 @@ static void *thread_main(void *param)
 #endif
 
     /* Set current thread id. */
-    rc = pj_thread_local_set(thread_tls_id, rec);
+    rc = pj_thread_local_set(thread_tls_id[rec->inst_id], rec);
     if (rc != PJ_SUCCESS) {
 	pj_assert(!"Thread TLS ID is not set (pj_init() error?)");
     }
@@ -582,6 +655,7 @@ PJ_DEF(pj_status_t) pj_thread_create( pj_pool_t *pool,
     /* Create the thread. */
     rec->proc = proc;
     rec->arg = arg;
+	rec->inst_id = pool->factory->inst_id;
     rc = pthread_create( &rec->thread, &thread_attr, &thread_main, rec);
     if (rc != 0) {
 	return PJ_RETURN_OS_ERROR(rc);
@@ -632,10 +706,13 @@ PJ_DEF(pj_status_t) pj_thread_resume(pj_thread_t *p)
 /*
  * pj_thread_this()
  */
-PJ_DEF(pj_thread_t*) pj_thread_this(void)
+PJ_DEF(pj_thread_t*) pj_thread_this(int inst_id)
 {
 #if PJ_HAS_THREADS
-    pj_thread_t *rec = (pj_thread_t*)pj_thread_local_get(thread_tls_id);
+    pj_thread_t *rec;
+    if (inst_id != 1)
+        PJ_LOG(6, (THIS_FILE, "pj_thread_this() thrad_tls_id[%d]", inst_id));
+    rec = (pj_thread_t*)pj_thread_local_get(thread_tls_id[inst_id]);
     
     if (rec == NULL) {
 	pj_assert(!"Calling pjlib from unknown/external thread. You must "
@@ -668,7 +745,7 @@ PJ_DEF(pj_status_t) pj_thread_join(pj_thread_t *p)
 
     PJ_CHECK_STACK();
 
-    PJ_LOG(6, (pj_thread_this()->obj_name, "Joining thread %s", p->obj_name));
+    PJ_LOG(6, (pj_thread_this(rec->inst_id)->obj_name, "Joining thread %s", p->obj_name));
     result = pthread_join( rec->thread, &ret);
 
     if (result == 0)
@@ -1036,17 +1113,17 @@ PJ_DEF(void*) pj_thread_local_get(long index)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-PJ_DEF(void) pj_enter_critical_section(void)
+PJ_DEF(void) pj_enter_critical_section(int inst_id)
 {
 #if PJ_HAS_THREADS
-    pj_mutex_lock(&critical_section);
+    pj_mutex_lock(&critical_section[inst_id]);
 #endif
 }
 
-PJ_DEF(void) pj_leave_critical_section(void)
+PJ_DEF(void) pj_leave_critical_section(int inst_id)
 {
 #if PJ_HAS_THREADS
-    pj_mutex_unlock(&critical_section);
+    pj_mutex_unlock(&critical_section[inst_id]);
 #endif
 }
 
@@ -1058,7 +1135,7 @@ PJ_DECL(int) pthread_mutexattr_settype(pthread_mutexattr_t*,int);
 PJ_END_DECL
 #endif
 
-static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name, int type)
+static pj_status_t init_mutex(int inst_id, pj_mutex_t *mutex, const char *name, int type)
 {
 #if PJ_HAS_THREADS
     pthread_mutexattr_t attr;
@@ -1066,12 +1143,16 @@ static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name, int type)
 
     PJ_CHECK_STACK();
 
+	mutex->inst_id = inst_id;
+
     rc = pthread_mutexattr_init(&attr);
     if (rc != 0)
 	return PJ_RETURN_OS_ERROR(rc);
 
     if (type == PJ_MUTEX_SIMPLE) {
-#if (defined(PJ_LINUX) && PJ_LINUX!=0) || \
+#if PJ_ANDROID==1
+	rc = pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
+#elif (defined(PJ_LINUX) && PJ_LINUX!=0) || \
     defined(PJ_HAS_PTHREAD_MUTEXATTR_SETTYPE)
 	rc = pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_FAST_NP);
 #elif (defined(PJ_RTEMS) && PJ_RTEMS!=0) || \
@@ -1134,7 +1215,6 @@ static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name, int type)
 	mutex->obj_name[PJ_MAX_OBJ_NAME-1] = '\0';
     }
 
-    PJ_LOG(6, (mutex->obj_name, "Mutex created"));
     return PJ_SUCCESS;
 #else /* PJ_HAS_THREADS */
     return PJ_SUCCESS;
@@ -1157,8 +1237,8 @@ PJ_DEF(pj_status_t) pj_mutex_create(pj_pool_t *pool,
 
     mutex = PJ_POOL_ALLOC_T(pool, pj_mutex_t);
     PJ_ASSERT_RETURN(mutex, PJ_ENOMEM);
-
-    if ((rc=init_mutex(mutex, name, type)) != PJ_SUCCESS)
+	
+    if ((rc=init_mutex(pool->factory->inst_id, mutex, name, type)) != PJ_SUCCESS)
 	return rc;
     
     *ptr_mutex = mutex;
@@ -1202,11 +1282,11 @@ PJ_DEF(pj_status_t) pj_mutex_lock(pj_mutex_t *mutex)
 
 #if PJ_DEBUG
     PJ_LOG(6,(mutex->obj_name, "Mutex: thread %s is waiting (mutex owner=%s)", 
-				pj_thread_this()->obj_name,
+				pj_thread_this(mutex->inst_id)->obj_name,
 				mutex->owner_name));
 #else
     PJ_LOG(6,(mutex->obj_name, "Mutex: thread %s is waiting", 
-				pj_thread_this()->obj_name));
+				pj_thread_this(mutex->inst_id)->obj_name));
 #endif
 
     status = pthread_mutex_lock( &mutex->mutex );
@@ -1214,8 +1294,8 @@ PJ_DEF(pj_status_t) pj_mutex_lock(pj_mutex_t *mutex)
 
 #if PJ_DEBUG
     if (status == PJ_SUCCESS) {
-	mutex->owner = pj_thread_this();
-	pj_ansi_strcpy(mutex->owner_name, mutex->owner->obj_name);
+	mutex->owner = pj_thread_this(mutex->inst_id);
+	pj_ansi_strncpy(mutex->owner_name, mutex->owner->obj_name, PJ_MAX_OBJ_NAME);
 	++mutex->nesting_level;
     }
 
@@ -1223,12 +1303,12 @@ PJ_DEF(pj_status_t) pj_mutex_lock(pj_mutex_t *mutex)
 	      (status==0 ? 
 		"Mutex acquired by thread %s (level=%d)" : 
 		"Mutex acquisition FAILED by %s (level=%d)"),
-	      pj_thread_this()->obj_name,
+	      pj_thread_this(mutex->inst_id)->obj_name,
 	      mutex->nesting_level));
 #else
     PJ_LOG(6,(mutex->obj_name, 
 	      (status==0 ? "Mutex acquired by thread %s" : "FAILED by %s"),
-	      pj_thread_this()->obj_name));
+	      pj_thread_this(mutex->inst_id)->obj_name));
 #endif
 
     if (status == 0)
@@ -1253,18 +1333,18 @@ PJ_DEF(pj_status_t) pj_mutex_unlock(pj_mutex_t *mutex)
     PJ_ASSERT_RETURN(mutex, PJ_EINVAL);
 
 #if PJ_DEBUG
-    pj_assert(mutex->owner == pj_thread_this());
+    pj_assert(mutex->owner == pj_thread_this(mutex->inst_id));
     if (--mutex->nesting_level == 0) {
 	mutex->owner = NULL;
 	mutex->owner_name[0] = '\0';
     }
 
     PJ_LOG(6,(mutex->obj_name, "Mutex released by thread %s (level=%d)", 
-				pj_thread_this()->obj_name, 
+				pj_thread_this(mutex->inst_id)->obj_name,
 				mutex->nesting_level));
 #else
     PJ_LOG(6,(mutex->obj_name, "Mutex released by thread %s", 
-				pj_thread_this()->obj_name));
+				pj_thread_this(mutex->inst_id)->obj_name));
 #endif
 
     status = pthread_mutex_unlock( &mutex->mutex );
@@ -1291,26 +1371,26 @@ PJ_DEF(pj_status_t) pj_mutex_trylock(pj_mutex_t *mutex)
     PJ_ASSERT_RETURN(mutex, PJ_EINVAL);
 
     PJ_LOG(6,(mutex->obj_name, "Mutex: thread %s is trying", 
-				pj_thread_this()->obj_name));
+				pj_thread_this(mutex->inst_id)->obj_name));
 
     status = pthread_mutex_trylock( &mutex->mutex );
 
     if (status==0) {
 #if PJ_DEBUG
-	mutex->owner = pj_thread_this();
-	pj_ansi_strcpy(mutex->owner_name, mutex->owner->obj_name);
+	mutex->owner = pj_thread_this(mutex->inst_id);
+	pj_ansi_strncpy(mutex->owner_name, mutex->owner->obj_name, PJ_MAX_OBJ_NAME);
 	++mutex->nesting_level;
 
 	PJ_LOG(6,(mutex->obj_name, "Mutex acquired by thread %s (level=%d)", 
-				   pj_thread_this()->obj_name,
+				   pj_thread_this(mutex->inst_id)->obj_name,
 				   mutex->nesting_level));
 #else
 	PJ_LOG(6,(mutex->obj_name, "Mutex acquired by thread %s", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(mutex->inst_id)->obj_name));
 #endif
     } else {
 	PJ_LOG(6,(mutex->obj_name, "Mutex: thread %s's trylock() failed", 
-				    pj_thread_this()->obj_name));
+				    pj_thread_this(mutex->inst_id)->obj_name));
     }
     
     if (status==0)
@@ -1337,7 +1417,7 @@ PJ_DEF(pj_status_t) pj_mutex_destroy(pj_mutex_t *mutex)
 
 #if PJ_HAS_THREADS
     PJ_LOG(6,(mutex->obj_name, "Mutex destroyed by thread %s",
-			       pj_thread_this()->obj_name));
+			       pj_thread_this(mutex->inst_id)->obj_name));
 
     for (retry=0; retry<RETRY; ++retry) {
 	status = pthread_mutex_destroy( &mutex->mutex );
@@ -1363,12 +1443,18 @@ PJ_DEF(pj_status_t) pj_mutex_destroy(pj_mutex_t *mutex)
 PJ_DEF(pj_bool_t) pj_mutex_is_locked(pj_mutex_t *mutex)
 {
 #if PJ_HAS_THREADS
-    return mutex->owner == pj_thread_this();
+    return mutex->owner == pj_thread_this(mutex->inst_id);
 #else
     return 1;
 #endif
 }
 #endif
+
+PJ_DEF(int) pj_get_mutex_inst_id(pj_mutex_t *mutex)
+{
+	PJ_ASSERT_RETURN(mutex, -1);
+	return mutex->inst_id;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 /*
@@ -1384,6 +1470,7 @@ PJ_DEF(pj_bool_t) pj_mutex_is_locked(pj_mutex_t *mutex)
 #else
 struct pj_rwmutex_t
 {
+	int inst_id;
     pthread_rwlock_t rwlock;
 };
 
@@ -1397,6 +1484,7 @@ PJ_DEF(pj_status_t) pj_rwmutex_create(pj_pool_t *pool, const char *name,
     
     rwm = PJ_POOL_ALLOC_T(pool, pj_rwmutex_t);
     PJ_ASSERT_RETURN(rwm, PJ_ENOMEM);
+    rwm->inst_id = pool->factory->inst_id;
 
     status = pthread_rwlock_init(&rwm->rwlock, NULL);
     if (status != 0)
@@ -1499,6 +1587,8 @@ PJ_DEF(pj_status_t) pj_sem_create( pj_pool_t *pool,
     sem = PJ_POOL_ALLOC_T(pool, pj_sem_t);
     PJ_ASSERT_RETURN(sem, PJ_ENOMEM);
 
+	sem->inst_id = pool->factory->inst_id;
+
 #if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
     /* MacOS X doesn't support anonymous semaphore */
     {
@@ -1514,7 +1604,7 @@ PJ_DEF(pj_status_t) pj_sem_create( pj_pool_t *pool,
 	/* Create a unique name for the semaphore. */
 	if (PJ_GUID_STRING_LENGTH <= MAX_SEM_NAME_LEN) {
 	    nam.ptr = sem_name;
-	    pj_generate_unique_string(&nam);
+	    pj_generate_unique_string(pool->factory->inst_id, &nam);
 	    sem_name[nam.slen] = '\0';
 	} else {
 	    pj_create_random_string(sem_name, MAX_SEM_NAME_LEN);
@@ -1522,13 +1612,20 @@ PJ_DEF(pj_status_t) pj_sem_create( pj_pool_t *pool,
 	}
 
 	/* Create semaphore */
+#if 1
+	sem->sem = dispatch_semaphore_create(0);
+	if(!sem->sem)
+	    return PJ_RETURN_OS_ERROR(pj_get_native_os_error());
+#else
 	sem->sem = sem_open(sem_name, O_CREAT|O_EXCL, S_IRUSR|S_IWUSR, 
 			    initial);
+
 	if (sem->sem == SEM_FAILED)
 	    return PJ_RETURN_OS_ERROR(pj_get_native_os_error());
 
 	/* And immediately release the name as we don't need it */
 	sem_unlink(sem_name);
+#endif
     }
 #else
     sem->sem = PJ_POOL_ALLOC_T(pool, sem_t);
@@ -1569,16 +1666,20 @@ PJ_DEF(pj_status_t) pj_sem_wait(pj_sem_t *sem)
     PJ_ASSERT_RETURN(sem, PJ_EINVAL);
 
     PJ_LOG(6, (sem->obj_name, "Semaphore: thread %s is waiting", 
-			      pj_thread_this()->obj_name));
+			      pj_thread_this(sem->inst_id)->obj_name));
 
-    result = sem_wait( sem->sem );
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+	result = dispatch_semaphore_wait(sem->sem, DISPATCH_TIME_FOREVER );
+#else
+    result = sem_wait( sem->sem);
     
+#endif
     if (result == 0) {
 	PJ_LOG(6, (sem->obj_name, "Semaphore acquired by thread %s", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(sem->inst_id)->obj_name));
     } else {
 	PJ_LOG(6, (sem->obj_name, "Semaphore: thread %s FAILED to acquire", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(sem->inst_id)->obj_name));
     }
 
     if (result == 0)
@@ -1602,11 +1703,15 @@ PJ_DEF(pj_status_t) pj_sem_trywait(pj_sem_t *sem)
     PJ_CHECK_STACK();
     PJ_ASSERT_RETURN(sem, PJ_EINVAL);
 
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+	//result = dispatch_semaphore_wait
+    return PJ_SUCCESS;
+#else
     result = sem_trywait( sem->sem );
-    
+#endif
     if (result == 0) {
 	PJ_LOG(6, (sem->obj_name, "Semaphore acquired by thread %s", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(sem->inst_id)->obj_name));
     } 
     if (result == 0)
 	return PJ_SUCCESS;
@@ -1619,6 +1724,69 @@ PJ_DEF(pj_status_t) pj_sem_trywait(pj_sem_t *sem)
 }
 
 /*
+ * pj_sem_trywait2()
+ */
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+
+PJ_DEF(pj_status_t) pj_sem_trywait2(pj_sem_t *sem)
+{
+#if 1
+	pj_status_t result;
+	uint64_t delay_ms = 1000000;
+	dispatch_time_t  delay_t = dispatch_time(DISPATCH_TIME_NOW, delay_ms);
+	if(dispatch_semaphore_wait(sem->sem, delay_t)){
+		usleep(1000);
+		return PJ_RETURN_OS_ERROR(pj_get_native_os_error());
+	}else return PJ_SUCCESS;
+#else
+	pj_status_t st = -1;
+	unsigned long start_t, curr_t;
+	//uint64_t tstart;
+	//struct timespec tstart={0,0}, tend={0,0};
+	//clock_serv_t cclock;
+    	//clock_gettime(cclock , &tstart);
+	struct timeval tstart,tcurr;
+	gettimeofday(&tstart, NULL);
+	start_t = 1000000*tstart.tv_sec+ tstart.tv_usec;
+	while(st = pj_sem_trywait(sem) == -1 ){
+		if(errno == EAGAIN){
+    			//clock_gettime(cclock, &tend);	
+			gettimeofday(&tcurr, NULL);
+			curr_t = 1000000*tcurr.tv_sec + tcurr.tv_usec;
+			if(curr_t-start_t > 1000) {
+				st = -1;
+				break;
+			} 
+			else usleep(10);
+		}else{
+			st =  -1;
+			break;
+		}
+	}
+	return st;
+#endif
+}
+
+#else
+PJ_DEF(pj_status_t) pj_sem_trywait2(pj_sem_t *sem)
+{
+	struct timespec ts;
+
+	if(clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+		usleep(1000);
+		return -1;
+	}
+
+	ts.tv_nsec += 10000000; //10 milliseconds
+	if(ts.tv_nsec>=1000000000) {
+		ts.tv_sec++;
+		ts.tv_nsec -= 1000000000;
+	}
+	return sem_timedwait(sem->sem, &ts);
+}
+#endif
+
+/*
  * pj_sem_post()
  */
 PJ_DEF(pj_status_t) pj_sem_post(pj_sem_t *sem)
@@ -1626,9 +1794,12 @@ PJ_DEF(pj_status_t) pj_sem_post(pj_sem_t *sem)
 #if PJ_HAS_THREADS
     int result;
     PJ_LOG(6, (sem->obj_name, "Semaphore released by thread %s",
-			      pj_thread_this()->obj_name));
+			      pj_thread_this(sem->inst_id)->obj_name));
+#if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+	result = dispatch_semaphore_signal(sem->sem);
+#else
     result = sem_post( sem->sem );
-
+#endif
     if (result == 0)
 	return PJ_SUCCESS;
     else
@@ -1651,9 +1822,14 @@ PJ_DEF(pj_status_t) pj_sem_destroy(pj_sem_t *sem)
     PJ_ASSERT_RETURN(sem, PJ_EINVAL);
 
     PJ_LOG(6, (sem->obj_name, "Semaphore destroyed by thread %s",
-			      pj_thread_this()->obj_name));
+			      pj_thread_this(sem->inst_id)->obj_name));
 #if defined(PJ_DARWINOS) && PJ_DARWINOS!=0
+#if 1
+	dispatch_release(sem->sem);
+	result = 0;
+#else
     result = sem_close( sem->sem );
+#endif
 #else
     result = sem_destroy( sem->sem );
 #endif

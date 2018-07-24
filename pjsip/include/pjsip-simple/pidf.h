@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pidf.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -104,7 +104,7 @@ extern struct pjpidf_op_desc
  * Top level API for managing presence document. 
  *****************************************************************************/
 PJ_DECL(pjpidf_pres*)    pjpidf_create(pj_pool_t *pool, const pj_str_t *entity);
-PJ_DECL(pjpidf_pres*)	 pjpidf_parse(pj_pool_t *pool, char *text, int len);
+PJ_DECL(pjpidf_pres*)	 pjpidf_parse(int inst_id, pj_pool_t *pool, char *text, int len);
 PJ_DECL(int)		 pjpidf_print(const pjpidf_pres* pres, char *buf, int len);
 
 

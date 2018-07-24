@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: except.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -233,32 +233,35 @@ PJ_BEGIN_DECL
  * PJ_HAS_EXCEPTION_NAMES is enabled (default is yes)) and find out the
  * exception name when it catches an exception.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param name      Name to be associated with the exception ID.
  * @param id        Pointer to receive the ID.
  *
  * @return          PJ_SUCCESS on success or PJ_ETOOMANY if the library 
  *                  is running out out ids.
  */
-PJ_DECL(pj_status_t) pj_exception_id_alloc(const char *name,
+PJ_DECL(pj_status_t) pj_exception_id_alloc(int inst_id, const char *name,
                                            pj_exception_id_t *id);
 
 /**
  * Free an exception id.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param id        The exception ID.
  *
  * @return          PJ_SUCCESS or the appropriate error code.
  */
-PJ_DECL(pj_status_t) pj_exception_id_free(pj_exception_id_t id);
+PJ_DECL(pj_status_t) pj_exception_id_free(int inst_id, pj_exception_id_t id);
 
 /**
  * Retrieve name associated with the exception id.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param id        The exception ID.
  *
  * @return          The name associated with the specified ID.
  */
-PJ_DECL(const char*) pj_exception_id_name(pj_exception_id_t id);
+PJ_DECL(const char*) pj_exception_id_name(int inst_id, pj_exception_id_t id);
 
 
 /** @} */
@@ -349,17 +352,17 @@ struct pj_exception_state_t
  * @param id    Exception Id.
  */
 PJ_DECL_NO_RETURN(void) 
-pj_throw_exception_(pj_exception_id_t id) PJ_ATTR_NORETURN;
+pj_throw_exception_(int inst_id, pj_exception_id_t id) PJ_ATTR_NORETURN;
 
 /**
  * Push exception handler.
  */
-PJ_DECL(void) pj_push_exception_handler_(struct pj_exception_state_t *rec);
+PJ_DECL(void) pj_push_exception_handler_(int inst_id, struct pj_exception_state_t *rec);
 
 /**
  * Pop exception handler.
  */
-PJ_DECL(void) pj_pop_exception_handler_(struct pj_exception_state_t *rec);
+PJ_DECL(void) pj_pop_exception_handler_(int inst_id, struct pj_exception_state_t *rec);
 
 /**
  * Declare that the function will use exception.
@@ -371,8 +374,8 @@ PJ_DECL(void) pj_pop_exception_handler_(struct pj_exception_state_t *rec);
  * Start exception specification block.
  * @hideinitializer
  */
-#define PJ_TRY		    if (1) { \
-				pj_push_exception_handler_(&pj_x_except__); \
+#define PJ_TRY(inst_id)		    if (1) { \
+				pj_push_exception_handler_(inst_id, &pj_x_except__); \
 				pj_x_code__ = pj_setjmp(pj_x_except__.state); \
 				if (pj_x_code__ == 0)
 /**
@@ -392,7 +395,7 @@ PJ_DECL(void) pj_pop_exception_handler_(struct pj_exception_state_t *rec);
  * End of exception specification block.
  * @hideinitializer
  */
-#define PJ_END			pj_pop_exception_handler_(&pj_x_except__); \
+#define PJ_END(inst_id)			pj_pop_exception_handler_(inst_id, &pj_x_except__); \
 			    } else {}
 
 /**
@@ -400,7 +403,7 @@ PJ_DECL(void) pj_pop_exception_handler_(struct pj_exception_state_t *rec);
  * @param exception_id  The exception number.
  * @hideinitializer
  */
-#define PJ_THROW(exception_id)	pj_throw_exception_(exception_id)
+#define PJ_THROW(inst_id, exception_id)	pj_throw_exception_(inst_id, exception_id)
 
 /**
  * Get current exception.

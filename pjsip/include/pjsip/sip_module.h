@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_module.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -93,32 +93,35 @@ struct pjsip_module
      * Optional function to be called to start the module. This function
      * will be called by endpoint during module registration. If the value
      * is NULL, then it's equal to returning PJ_SUCCESS.
-     *
+	 *
+	 * @param endpt	The endpoint instance.
      * @return		Module should return zero to indicate success.
      */
-    pj_status_t (*start)(void);
+    pj_status_t (*start)(pjsip_endpoint *endpt);
 
     /**
      * Optional function to be called to deinitialize the module before
      * it is unloaded. This function will be called by endpoint during 
      * module unregistration. If the value is NULL, then it's equal to 
      * returning PJ_SUCCESS.
-     *
+	 *
+	 * @param endpt	The endpoint instance.
      * @return		Module should return PJ_SUCCESS to indicate success.
      */
-    pj_status_t (*stop)(void);
+    pj_status_t (*stop)(pjsip_endpoint *endpt);
 
     /**
      * Optional function to be called to deinitialize the module before
      * it is unloaded. This function will be called by endpoint during 
      * module unregistration. If the value is NULL, then it's equal to 
      * returning PJ_SUCCESS.
-     *
+	 *
+	 * @param endpt	The endpoint instance.
      * @param mod	The module.
      *
      * @return		Module should return PJ_SUCCESS to indicate success.
      */
-    pj_status_t (*unload)(void);
+    pj_status_t (*unload)(pjsip_endpoint *endpt);
 
     /**
      * Optional function to be called to process incoming request message.

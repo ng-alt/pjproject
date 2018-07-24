@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_transport_tls.c 4394 2013-02-27 12:02:42Z ming $ */
 /* 
  * Copyright (C) 2009-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -71,6 +71,7 @@ struct delayed_tdata
 {
     PJ_DECL_LIST_MEMBER(struct delayed_tdata);
     pjsip_tx_data_op_key    *tdata_op_key;
+    pj_time_val              timeout;
 };
 
 
@@ -194,9 +195,21 @@ static void tls_init_shutdown(struct tls_transport *tls, pj_status_t status)
     state_cb = pjsip_tpmgr_get_state_cb(tls->base.tpmgr);
     if (state_cb) {
 	pjsip_transport_state_info state_info;
+	pjsip_tls_state_info tls_info;
+	pj_ssl_sock_info ssl_info;
 
+	/* Init transport state info */
 	pj_bzero(&state_info, sizeof(state_info));
 	state_info.status = tls->close_reason;
+
+	if (tls->ssock && 
+	    pj_ssl_sock_get_info(tls->ssock, &ssl_info) == PJ_SUCCESS)
+	{
+	    pj_bzero(&tls_info, sizeof(tls_info));
+	    tls_info.ssl_sock_info = &ssl_info;
+	    state_info.ext_info = &tls_info;
+	}
+
 	(*state_cb)(&tls->base, PJSIP_TP_STATE_DISCONNECTED, &state_info);
     }
 
@@ -234,8 +247,12 @@ PJ_DEF(pj_status_t) pjsip_tls_transport_start (pjsip_endpoint *endpt,
     pj_bool_t has_listener;
     pj_status_t status;
 
+	int inst_id;
+
     /* Sanity check */
     PJ_ASSERT_RETURN(endpt && async_cnt, PJ_EINVAL);
+
+	inst_id = pjsip_endpt_get_inst_id(endpt);
 
     /* Verify that address given in a_name (if any) is valid */
     if (a_name && a_name->host.slen) {
@@ -293,6 +310,8 @@ PJ_DEF(pj_status_t) pjsip_tls_transport_start (pjsip_endpoint *endpt,
 	ssock_param.send_buffer_size = PJSIP_MAX_PKT_LEN;
     if (ssock_param.read_buffer_size < PJSIP_MAX_PKT_LEN)
 	ssock_param.read_buffer_size = PJSIP_MAX_PKT_LEN;
+    ssock_param.ciphers_num = listener->tls_setting.ciphers_num;
+    ssock_param.ciphers = listener->tls_setting.ciphers;
     ssock_param.qos_type = listener->tls_setting.qos_type;
     ssock_param.qos_ignore_error = listener->tls_setting.qos_ignore_error;
     pj_memcpy(&ssock_param.qos_params, &listener->tls_setting.qos_params,
@@ -324,7 +343,7 @@ PJ_DEF(pj_status_t) pjsip_tls_transport_start (pjsip_endpoint *endpt,
 	goto on_error;
 
     listener_addr = (pj_sockaddr_in*)&listener->factory.local_addr;
-    if (local) {
+	if (local) {
 	pj_sockaddr_cp((pj_sockaddr_t*)listener_addr, 
 		       (const pj_sockaddr_t*)local);
     } else {
@@ -364,8 +383,9 @@ PJ_DEF(pj_status_t) pjsip_tls_transport_start (pjsip_endpoint *endpt,
 
 	/* Retrieve the bound address */
 	status = pj_ssl_sock_get_info(listener->ssock, &info);
-	if (status == PJ_SUCCESS)
+	if (status == PJ_SUCCESS) {
 	    pj_sockaddr_cp(listener_addr, (pj_sockaddr_t*)&info.local_addr);
+	}
     } else if (status != PJ_ENOTSUP) {
 	goto on_error;
     }
@@ -528,10 +548,8 @@ static pj_status_t tls_create( struct tls_listener *listener,
     struct tls_transport *tls;
     const pj_str_t ka_pkt = PJSIP_TLS_KEEP_ALIVE_DATA;
     pj_status_t status;
-    
 
     PJ_ASSERT_RETURN(listener && ssock && local && remote && p_tls, PJ_EINVAL);
-
 
     if (pool == NULL) {
 	pool = pjsip_endpt_create_pool(listener->endpt, "tls",
@@ -578,10 +596,10 @@ static pj_status_t tls_create( struct tls_listener *listener,
     tls->base.dir = is_server? PJSIP_TP_DIR_INCOMING : PJSIP_TP_DIR_OUTGOING;
     
     /* Set initial local address */
-    if (!pj_sockaddr_has_addr(local)) {
+	if (!pj_sockaddr_has_addr(local)) {
         pj_sockaddr_cp(&tls->base.local_addr,
                        &listener->factory.local_addr);
-    } else {
+	} else {
 	pj_sockaddr_cp(&tls->base.local_addr, local);
     }
     
@@ -633,6 +651,9 @@ on_error:
 /* Flush all delayed transmision once the socket is connected. */
 static void tls_flush_pending_tx(struct tls_transport *tls)
 {
+    pj_time_val now;
+
+    pj_gettickcount(&now);
     pj_lock_acquire(tls->base.lock);
     while (!pj_list_empty(&tls->delayed_list)) {
 	struct delayed_tdata *pending_tx;
@@ -647,13 +668,21 @@ static void tls_flush_pending_tx(struct tls_transport *tls)
 	tdata = pending_tx->tdata_op_key->tdata;
 	op_key = (pj_ioqueue_op_key_t*)pending_tx->tdata_op_key;
 
+        if (pending_tx->timeout.sec > 0 &&
+            PJ_TIME_VAL_GT(now, pending_tx->timeout))
+        {
+            continue;
+        }
+
 	/* send! */
 	size = tdata->buf.cur - tdata->buf.start;
 	status = pj_ssl_sock_send(tls->ssock, op_key, tdata->buf.start, 
 				  &size, 0);
 
 	if (status != PJ_EPENDING) {
+            pj_lock_release(tls->base.lock);
 	    on_data_sent(tls->ssock, op_key, size);
+            pj_lock_acquire(tls->base.lock);
 	}
     }
     pj_lock_release(tls->base.lock);
@@ -842,7 +871,6 @@ static pj_status_t lis_create_transport(pjsip_tpfactory *factory,
     PJ_ASSERT_RETURN(rem_addr->addr.sa_family == pj_AF_INET() &&
 		     addr_len == sizeof(pj_sockaddr_in), PJ_EINVAL);
 
-
     listener = (struct tls_listener*)factory;
 
     pool = pjsip_endpt_create_pool(listener->endpt, "tls",
@@ -862,7 +890,6 @@ static pj_status_t lis_create_transport(pjsip_tpfactory *factory,
     ssock_param.cb.on_data_sent = &on_data_sent;
     ssock_param.async_cnt = 1;
     ssock_param.ioqueue = pjsip_endpt_get_ioqueue(listener->endpt);
-    PJ_TODO(synchronize_tls_cipher_type_with_ssl_sock_cipher_type);
     ssock_param.server_name = remote_name;
     ssock_param.timeout = listener->tls_setting.timeout;
     ssock_param.user_data = NULL; /* pending, must be set later */
@@ -872,8 +899,11 @@ static pj_status_t lis_create_transport(pjsip_tpfactory *factory,
 	ssock_param.send_buffer_size = PJSIP_MAX_PKT_LEN;
     if (ssock_param.read_buffer_size < PJSIP_MAX_PKT_LEN)
 	ssock_param.read_buffer_size = PJSIP_MAX_PKT_LEN;
+    ssock_param.ciphers_num = listener->tls_setting.ciphers_num;
+    ssock_param.ciphers = listener->tls_setting.ciphers;
     ssock_param.qos_type = listener->tls_setting.qos_type;
-    ssock_param.qos_ignore_error = listener->tls_setting.qos_ignore_error;
+	ssock_param.qos_ignore_error = listener->tls_setting.qos_ignore_error;
+	ssock_param.timer_heap = pjsip_endpt_get_timer_heap(endpt);  // dean : for ssl handshake timeout detection.
     pj_memcpy(&ssock_param.qos_params, &listener->tls_setting.qos_params,
 	      sizeof(ssock_param.qos_params));
 
@@ -946,7 +976,7 @@ static pj_status_t lis_create_transport(pjsip_tpfactory *factory,
 	    new_port = pj_sockaddr_get_port((pj_sockaddr_t*)&info.local_addr);
 
 	    if (pj_sockaddr_has_addr((pj_sockaddr_t*)&info.local_addr)) {
-		/* Update sockaddr */
+			/* Update sockaddr */
 		pj_sockaddr_cp((pj_sockaddr_t*)&tls->base.local_addr,
 			       (pj_sockaddr_t*)&info.local_addr);
 	    } else if (new_port && new_port != pj_sockaddr_get_port(
@@ -1202,10 +1232,19 @@ static pj_status_t tls_send_msg(pjsip_transport *transport,
 	    /*
 	     * connect() is still in progress. Put the transmit data to
 	     * the delayed list.
+             * Starting from #1583 (https://trac.pjsip.org/repos/ticket/1583),
+             * we also add timeout value for the transmit data. When the
+             * connect() is completed, the timeout value will be checked to
+             * determine whether the transmit data needs to be sent.
 	     */
-	    delayed_tdata = PJ_POOL_ALLOC_T(tdata->pool, 
+	    delayed_tdata = PJ_POOL_ZALLOC_T(tdata->pool, 
 					    struct delayed_tdata);
 	    delayed_tdata->tdata_op_key = &tdata->op_key;
+            if (tdata->msg && tdata->msg->type == PJSIP_REQUEST_MSG) {
+                pj_gettickcount(&delayed_tdata->timeout);
+                delayed_tdata->timeout.msec += pjsip_cfg()->tsx.td;
+                pj_time_val_normalize(&delayed_tdata->timeout);
+            }
 
 	    pj_list_push_back(&tls->delayed_list, delayed_tdata);
 	    status = PJ_EPENDING;
@@ -1388,7 +1427,7 @@ static pj_bool_t on_connect_complete(pj_ssl_sock_t *ssock,
      * set is different now that the socket is connected (could happen
      * on some systems, like old Win32 probably?).
      */
-    tp_addr = (pj_sockaddr_in*)&tls->base.local_addr;
+	tp_addr = (pj_sockaddr_in*)&tls->base.local_addr;
     pj_sockaddr_cp((pj_sockaddr_t*)&addr, 
 		   (pj_sockaddr_t*)&ssl_info.local_addr);
     if (tp_addr->sin_addr.s_addr != addr.sin_addr.s_addr) {

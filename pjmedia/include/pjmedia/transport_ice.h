@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: transport_ice.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -53,11 +53,32 @@ typedef struct pjmedia_ice_cb
      *
      * @param tp	PJMEDIA ICE transport.
      * @param op	The operation
-     * @param status	Operation status.
+	 * @param status	Operation status.
+	 * @param turn_mapped_addr	TURN socket mapped address if any, otherwise it is NULL.
      */
     void    (*on_ice_complete)(pjmedia_transport *tp,
 			       pj_ice_strans_op op,
-			       pj_status_t status);
+				   pj_status_t status,
+				   pj_sockaddr *turn_mapped_addr);
+
+	/**
+	 * 2013-05-20 DEAN
+	 * This call will be called when stun binding completes.
+	 * @param local_addr.		The server listening local address.
+	 */
+	pj_status_t    (*on_stun_binding_complete)(pjmedia_transport *tp,
+										 pj_sockaddr *local_addr, 
+										 int ip_chanaged_type);
+
+	/**
+	 * 2014-01-12 DEAN
+	 * This call will be called when tcp server was created.
+	 * @param [out] external_addr.	The stun mapped address.
+	 * @param [in] local_addr.		The server listening local address.
+	 */
+	pj_status_t	   (*on_tcp_server_binding_complete)(pjmedia_transport *tp,
+					pj_sockaddr *external_addr,
+					pj_sockaddr *local_addr);
 
 } pjmedia_ice_cb;
 
@@ -147,6 +168,7 @@ enum pjmedia_transport_ice_options
  * @param comp_cnt	Number of components to be created.
  * @param cfg		Pointer to configuration settings.
  * @param cb		Optional structure containing ICE specific callbacks.
+ * @param inv_recv_time		The invite message receiving time for encoding into SDP of 200 OK message.
  * @param p_tp		Pointer to receive the media transport instance.
  *
  * @return		PJ_SUCCESS on success, or the appropriate error code.
@@ -156,6 +178,8 @@ PJ_DECL(pj_status_t) pjmedia_ice_create(pjmedia_endpt *endpt,
 					unsigned comp_cnt,
 					const pj_ice_strans_cfg *cfg,
 					const pjmedia_ice_cb *cb,
+					int tp_idx,
+					pj_time_val inv_recv_time,
 					pjmedia_transport **p_tp);
 
 
@@ -179,7 +203,81 @@ PJ_DECL(pj_status_t) pjmedia_ice_create2(pjmedia_endpt *endpt,
 					 const pj_ice_strans_cfg *cfg,
 					 const pjmedia_ice_cb *cb,
 					 unsigned options,
+					 int tp_idx,
+					 pj_time_val inv_recv_time,
 					 pjmedia_transport **p_tp);
+PJ_DECL(pj_bool_t) pjmedia_ice_get_ice_restart(void *user_data);
+
+PJ_DECL(void) pjmedia_ice_set_ice_restart(void *user_data, pj_bool_t ice_restart);
+
+PJ_DECL(natnl_tunnel_type) pjmedia_ice_get_use_tunnel_type(void *user_data);
+
+PJ_DECL(void) pjmedia_ice_set_turn_password(void *user_data, pj_str_t turn_password);
+
+#if 0
+
+PJ_DECL(void) pjmedia_ice_set_use_upnp_flag(void *user_data, int use_upnp_flag);
+
+PJ_DECL(void) pjmedia_ice_set_use_stun_cand(void *user_data, pj_bool_t use_stun_cand);
+
+PJ_DECL(void) pjmedia_ice_set_use_turn_flag(void *user_data, int use_turn_flag);
+
+
+//====== local and remote user id ======
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_local_userid(void *user_data, char *user_id, int user_id_len);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_local_userid(void *user_data, char *user_id);
+
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_remote_userid(void *user_data, char *user_id, int user_id_len);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_remote_userid(void *user_data, char *user_id);
+
+
+//====== local and remote device id ======
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_local_deviceid(void *user_data, char *device_id, int user_id_len);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_local_deviceid(void *user_data, char *device_id);
+
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_remote_deviceid(void *user_data, char *device_id, int device_id_len);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_remote_deviceid(void *user_data, char *device_id);
+
+
+//====== local and remote turn server ======
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_local_turnsrv(void *user_data, char *turn_server);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_local_turnsrv(void *user_data, char *turn_server, int turn_server_len);
+
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_remote_turnsvr(void *user_data, char *turn_server, int turn_server_len);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_remote_turnsvr(void *user_data, char *turn_server);
+
+
+//====== local and remote turn password ======
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_local_turnpwd(void *user_data, char *turn_pwd, int turn_pwd_len );
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_local_turnpwd(void *user_data, char *turn_pwd);
+
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_set_remote_turnpwd(void *user_data, char *turn_pwd, int turn_pwd_len);
+/* Dean Added */
+PJ_DECL(void) pjmedia_ice_get_remote_turnpwd(void *user_data, char *turn_pwd);
+#endif
+/* Dean Added */
+PJ_DECL(pj_bool_t) pjmedia_ice_get_local_path_selected(void *user_data);
+/* Dean Added */
+PJ_DECL(natnl_addr_changed_type) pjmedia_ice_get_addr_chagned_type(void *user_data);
+#if 0
+/* Dean Added */
+PJ_DECL(pj_str_t *) pjmedia_ice_get_dest_uri(void *user_data);
+#endif
 
 PJ_END_DECL
 

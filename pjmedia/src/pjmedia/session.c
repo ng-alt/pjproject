@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: session.c 4334 2013-01-25 06:31:05Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -57,6 +57,8 @@ static const pj_str_t ID_IP4 = { "IP4", 3};
 static const pj_str_t ID_IP6 = { "IP6", 3};
 static const pj_str_t ID_RTP_AVP = { "RTP/AVP", 7 };
 static const pj_str_t ID_RTP_SAVP = { "RTP/SAVP", 8 };
+static const pj_str_t ID_DTLS_SCTP = { "DTLS/SCTP", 9 }; // dean added for WebRTC data channel.
+static const pj_str_t ID_RTP_SCTP = { "RTP/SCTP", 8 }; // dean : RTP/SCTP is for UDT replacement
 //static const pj_str_t ID_SDP_NAME = { "pjmedia", 7 };
 static const pj_str_t ID_RTPMAP = { "rtpmap", 6 };
 static const pj_str_t ID_TELEPHONE_EVENT = { "telephone-event", 15 };
@@ -164,6 +166,8 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
     unsigned i, pt, fmti;
     pj_status_t status;
 
+	int inst_id = pjmedia_endpt_get_inst_id(endpt);
+
     
     /* Validate arguments: */
     PJ_ASSERT_RETURN(pool && si && local && remote, PJ_EINVAL);
@@ -200,11 +204,15 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 
     if (pj_stricmp(&local_m->desc.media, &ID_AUDIO) == 0) {
 
-	si->type = PJMEDIA_TYPE_AUDIO;
+		si->type = PJMEDIA_TYPE_AUDIO;
 
-    } else if (pj_stricmp(&local_m->desc.media, &ID_VIDEO) == 0) {
+	} else if (pj_stricmp(&local_m->desc.media, &ID_VIDEO) == 0) {
 
-	si->type = PJMEDIA_TYPE_VIDEO;
+		si->type = PJMEDIA_TYPE_VIDEO;
+
+	} else if (pj_stricmp(&local_m->desc.media, &ID_APPLICATION) == 0) { // dean : application is for WebRTC data channel.
+
+		si->type = PJMEDIA_TYPE_APPLICATION;
 
     } else {
 
@@ -230,11 +238,19 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 
     if (pj_stricmp(&local_m->desc.transport, &ID_RTP_AVP) == 0) {
 
-	si->proto = PJMEDIA_TP_PROTO_RTP_AVP;
+		si->proto = PJMEDIA_TP_PROTO_RTP_AVP;
 
-    } else if (pj_stricmp(&local_m->desc.transport, &ID_RTP_SAVP) == 0) {
+	} else if (pj_stricmp(&local_m->desc.transport, &ID_RTP_SAVP) == 0) {
 
-	si->proto = PJMEDIA_TP_PROTO_RTP_SAVP;
+		si->proto = PJMEDIA_TP_PROTO_RTP_SAVP;
+
+	} else if (pj_stricmp(&local_m->desc.transport, &ID_DTLS_SCTP) == 0) {
+
+		si->proto = PJMEDIA_TP_PROTO_DTLS_SCTP;
+
+	} else if (pj_stricmp(&local_m->desc.transport, &ID_RTP_SCTP) == 0) {
+
+		si->proto = PJMEDIA_TP_PROTO_RTP_SCTP;
 
     } else {
 
@@ -336,7 +352,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 				  "rtcp", NULL);
     if (attr) {
 	pjmedia_sdp_rtcp_attr rtcp;
-	status = pjmedia_sdp_attr_get_rtcp(attr, &rtcp);
+	status = pjmedia_sdp_attr_get_rtcp(inst_id, attr, &rtcp);
 	if (status == PJ_SUCCESS) {
 	    if (rtcp.addr.slen) {
 		status = pj_sockaddr_init(rem_af, &si->rem_rtcp, &rtcp.addr,
@@ -399,7 +415,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
      * For static payload types, get the info from codec manager.
      * For dynamic payload types, MUST get the rtpmap.
      */
-    if (pt < 96) {
+    if (pt < 96 || pt == 5000) { // dean : 5000 is for WebRTC data channel.
 	pj_bool_t has_rtpmap;
 
 	rtpmap = NULL;
@@ -411,7 +427,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 	    has_rtpmap = PJ_FALSE;
 	}
 	if (attr != NULL) {
-	    status = pjmedia_sdp_attr_to_rtpmap(pool, attr, &rtpmap);
+	    status = pjmedia_sdp_attr_to_rtpmap(inst_id, pool, attr, &rtpmap);
 	    if (status != PJ_SUCCESS)
 		has_rtpmap = PJ_FALSE;
 	}
@@ -460,7 +476,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 	if (attr == NULL)
 	    return PJMEDIA_EMISSINGRTPMAP;
 
-	status = pjmedia_sdp_attr_to_rtpmap(pool, attr, &rtpmap);
+	status = pjmedia_sdp_attr_to_rtpmap(inst_id, pool, attr, &rtpmap);
 	if (status != PJ_SUCCESS)
 	    return status;
 
@@ -498,7 +514,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 	    if (!r_attr)
 		continue;
 
-	    if (pjmedia_sdp_attr_get_rtpmap(r_attr, &r_rtpmap) != PJ_SUCCESS)
+	    if (pjmedia_sdp_attr_get_rtpmap(inst_id, r_attr, &r_rtpmap) != PJ_SUCCESS)
 		continue;
 
 	    if (!pj_stricmp(&rtpmap->enc_name, &r_rtpmap.enc_name) &&
@@ -572,7 +588,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 	attr = local_m->attr[i];
 	if (pj_strcmp(&attr->name, &ID_RTPMAP) != 0)
 	    continue;
-	if (pjmedia_sdp_attr_get_rtpmap(attr, &r) != PJ_SUCCESS)
+	if (pjmedia_sdp_attr_get_rtpmap(inst_id, attr, &r) != PJ_SUCCESS)
 	    continue;
 	if (pj_strcmp(&r.enc_name, &ID_TELEPHONE_EVENT) == 0) {
 	    si->rx_event_pt = pj_strtoul(&r.pt);
@@ -588,7 +604,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_info_from_sdp(
 	attr = rem_m->attr[i];
 	if (pj_strcmp(&attr->name, &ID_RTPMAP) != 0)
 	    continue;
-	if (pjmedia_sdp_attr_get_rtpmap(attr, &r) != PJ_SUCCESS)
+	if (pjmedia_sdp_attr_get_rtpmap(inst_id, attr, &r) != PJ_SUCCESS)
 	    continue;
 	if (pj_strcmp(&r.enc_name, &ID_TELEPHONE_EVENT) == 0) {
 	    si->tx_event_pt = pj_strtoul(&r.pt);
@@ -656,7 +672,7 @@ PJ_DEF(pj_status_t) pjmedia_session_create( pjmedia_endpt *endpt,
     PJ_ASSERT_RETURN(endpt && si && p_session, PJ_EINVAL);
 
     /* Create pool for the session. */
-    pool = pjmedia_endpt_create_pool( endpt, "session", 
+    pool = pjmedia_endpt_create_pool( endpt, "session%p", 
 				      PJMEDIA_SESSION_SIZE, 
 				      PJMEDIA_SESSION_INC);
     PJ_ASSERT_RETURN(pool != NULL, PJ_ENOMEM);
@@ -670,6 +686,27 @@ PJ_DEF(pj_status_t) pjmedia_session_create( pjmedia_endpt *endpt,
     /* Copy stream info (this simple memcpy may break sometime) */
     pj_memcpy(session->stream_info, si->stream_info,
 	      si->stream_cnt * sizeof(pjmedia_stream_info));
+
+    /* Clone codec param and format info */
+    for (i=0; i<(int)si->stream_cnt; ++i) {
+        pj_strdup(pool, &session->stream_info[i].fmt.encoding_name,
+                  &si->stream_info[i].fmt.encoding_name);
+	if (session->stream_info[i].param) {
+	    session->stream_info[i].param =
+		    pjmedia_codec_param_clone(pool, si->stream_info[i].param);
+	} else {
+	    pjmedia_codec_param cp;
+	    status = pjmedia_codec_mgr_get_default_param(
+					pjmedia_endpt_get_codec_mgr(endpt),
+					&si->stream_info[i].fmt,
+					&cp);
+	    if (status != PJ_SUCCESS)
+		return status;
+
+	    session->stream_info[i].param =
+		    pjmedia_codec_param_clone(pool, &cp);
+	}
+    }
 
     /*
      * Now create and start the stream!
@@ -879,6 +916,26 @@ PJ_DEF(pj_status_t) pjmedia_session_get_port(  pjmedia_session *session,
     return pjmedia_stream_get_port( session->stream[index], p_port);
 }
 
+
+/*
+ * Get the stream.
+ */
+PJ_DEF(pj_status_t) pjmedia_session_get_stream(  pjmedia_session *session,
+					       unsigned index,
+					       pjmedia_stream **p_stream)
+{
+    *p_stream = session->stream[index];
+	return PJ_SUCCESS;
+}
+
+PJ_DEF(pj_status_t) pjmedia_session_get_stream_info(pjmedia_session *session,
+													unsigned index,
+													pjmedia_stream_info **p_stream_info)
+{
+	*p_stream_info = &session->stream_info[index];
+	return PJ_SUCCESS;
+}
+
 /*
  * Get statistics
  */
@@ -982,3 +1039,16 @@ PJ_DEF(pj_status_t) pjmedia_session_set_dtmf_callback(pjmedia_session *session,
 					    user_data);
 }
 
+#if 0 // 2013-10-20 DEAN, deprecated
+/*
+ * Install DTMF callback.
+ */
+PJ_DEF(pj_status_t) pjmedia_session_set_nsmd_callback(pjmedia_session *session,
+				  unsigned index,
+				  void (*cb)(int call_id))
+{
+    PJ_ASSERT_RETURN(session && index < session->stream_cnt, PJ_EINVAL);
+
+    return pjmedia_stream_set_nsmd_callback(session->stream[index], cb);
+}
+#endif

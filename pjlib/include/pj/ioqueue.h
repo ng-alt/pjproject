@@ -1,4 +1,4 @@
-/* $Id$
+/* $Id: ioqueue.h 3553 2011-05-05 06:14:19Z nanang $
  */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
@@ -310,6 +310,12 @@ typedef enum pj_ioqueue_operation_e
 #define PJ_IOQUEUE_ALWAYS_ASYNC	    ((pj_uint32_t)1 << (pj_uint32_t)31)
 
 /**
+ * when this flags is specified in ioqueue's send() operations, 
+ * the ioqueue will promise to send out the data  -- Andrew Hung
+ */
+#define PJ_IOQUEUE_URGENT_DATA      ((pj_uint32_t)1 << (pj_uint32_t)30)
+
+/**
  * Return the name of the ioqueue implementation.
  *
  * @return		Implementation name.
@@ -400,6 +406,19 @@ PJ_DECL(pj_status_t) pj_ioqueue_set_default_concurrency(pj_ioqueue_t *ioqueue,
 PJ_DECL(pj_status_t) pj_ioqueue_register_sock( pj_pool_t *pool,
 					       pj_ioqueue_t *ioque,
 					       pj_sock_t sock,
+					       void *user_data,
+					       const pj_ioqueue_callback *cb,
+                                               pj_ioqueue_key_t **key );
+
+/**
+ * Variant of pj_ioqueue_register_sock() with additional group lock parameter.
+ * If group lock is set for the key, the key will add the reference counter
+ * when the socket is registered and decrease it when it is destroyed.
+ */
+PJ_DECL(pj_status_t) pj_ioqueue_register_sock2(pj_pool_t *pool,
+					       pj_ioqueue_t *ioque,
+					       pj_sock_t sock,
+					       pj_grp_lock_t *grp_lock,
 					       void *user_data,
 					       const pj_ioqueue_callback *cb,
                                                pj_ioqueue_key_t **key );
@@ -629,7 +648,7 @@ PJ_DECL(int) pj_ioqueue_poll( pj_ioqueue_t *ioque,
 /**
  * Instruct the I/O Queue to read from the specified handle. This function
  * returns immediately (i.e. non-blocking) regardless whether some data has 
- * been transfered. If the operation can't complete immediately, caller will 
+ * been transferred. If the operation can't complete immediately, caller will 
  * be notified about the completion when it calls pj_ioqueue_poll(). If data
  * is immediately available, the function will return PJ_SUCCESS and the
  * callback WILL NOT be called.
@@ -715,9 +734,9 @@ PJ_DECL(pj_status_t) pj_ioqueue_recvfrom( pj_ioqueue_key_t *key,
 /**
  * Instruct the I/O Queue to write to the handle. This function will return
  * immediately (i.e. non-blocking) regardless whether some data has been 
- * transfered. If the function can't complete immediately, the caller will
+ * transferred. If the function can't complete immediately, the caller will
  * be notified about the completion when it calls pj_ioqueue_poll(). If 
- * operation completes immediately and data has been transfered, the function
+ * operation completes immediately and data has been transferred, the function
  * returns PJ_SUCCESS and the callback will NOT be called.
  *
  * @param key	    The key that identifies the handle.
@@ -739,11 +758,11 @@ PJ_DECL(pj_status_t) pj_ioqueue_recvfrom( pj_ioqueue_key_t *key,
  *		    the function will never return PJ_SUCCESS.
  *
  * @return
- *  - PJ_SUCCESS    If data was immediately transfered. In this case, no
+ *  - PJ_SUCCESS    If data was immediately transferred. In this case, no
  *                  pending operation has been scheduled and the callback
  *                  WILL NOT be called.
  *  - PJ_EPENDING   If the operation has been queued. Once data base been
- *                  transfered, the callback will be called.
+ *                  transferred, the callback will be called.
  *  - non-zero      The return value indicates the error code.
  */
 PJ_DECL(pj_status_t) pj_ioqueue_send( pj_ioqueue_key_t *key,
@@ -756,9 +775,9 @@ PJ_DECL(pj_status_t) pj_ioqueue_send( pj_ioqueue_key_t *key,
 /**
  * Instruct the I/O Queue to write to the handle. This function will return
  * immediately (i.e. non-blocking) regardless whether some data has been 
- * transfered. If the function can't complete immediately, the caller will
+ * transferred. If the function can't complete immediately, the caller will
  * be notified about the completion when it calls pj_ioqueue_poll(). If 
- * operation completes immediately and data has been transfered, the function
+ * operation completes immediately and data has been transferred, the function
  * returns PJ_SUCCESS and the callback will NOT be called.
  *
  * @param key	    the key that identifies the handle.

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_replaces.c 3986 2012-03-22 11:29:20Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -52,7 +52,7 @@ static pjsip_hdr_vptr replaces_hdr_vptr =
 };
 
 /* Globals */
-static pjsip_endpoint *the_endpt;
+static pjsip_endpoint *the_endpt[PJSUA_MAX_INSTANCES];
 static pj_bool_t is_initialized;
 
 PJ_DEF(pjsip_replaces_hdr*) pjsip_replaces_hdr_create(pj_pool_t *pool)
@@ -162,8 +162,10 @@ static pjsip_hdr *parse_hdr_replaces(pjsip_parse_ctx *ctx)
 
 
 /* Deinitialize Replaces */
-static void pjsip_replaces_deinit_module(void)
+static void pjsip_replaces_deinit_module(pjsip_endpoint *endpt)
 {
+    PJ_TODO(provide_initialized_flag_for_each_endpoint);
+    PJ_UNUSED_ARG(endpt);
     is_initialized = PJ_FALSE;
 }
 
@@ -175,13 +177,15 @@ PJ_DEF(pj_status_t) pjsip_replaces_init_module(pjsip_endpoint *endpt)
     pj_status_t status;
     const pj_str_t STR_REPLACES = { "replaces", 8 };
 
-    the_endpt = endpt;
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
+
+    the_endpt[inst_id] = endpt;
 
     if (is_initialized)
 	return PJ_SUCCESS;
 
     /* Register Replaces header parser */
-    status = pjsip_register_hdr_parser( "Replaces", NULL, 
+    status = pjsip_register_hdr_parser( inst_id, "Replaces", NULL, 
 				        &parse_hdr_replaces);
     if (status != PJ_SUCCESS)
 	return status;
@@ -191,7 +195,8 @@ PJ_DEF(pj_status_t) pjsip_replaces_init_module(pjsip_endpoint *endpt)
 					1, &STR_REPLACES);
 
     /* Register deinit module to be executed when PJLIB shutdown */
-    if (pj_atexit(&pjsip_replaces_deinit_module) != PJ_SUCCESS) {
+    if (pjsip_endpt_atexit(endpt, &pjsip_replaces_deinit_module) != PJ_SUCCESS)
+    {
 	/* Failure to register this function may cause this module won't 
 	 * work properly when the stack is restarted (without quitting 
 	 * application).
@@ -222,11 +227,14 @@ PJ_DEF(pj_status_t) pjsip_replaces_verify_request( pjsip_rx_data *rdata,
     pjsip_inv_session *inv;
     pj_status_t status = PJ_SUCCESS;
 
+	int inst_id;
+
     PJ_ASSERT_RETURN(rdata && p_dlg, PJ_EINVAL);
 
     /* Check that pjsip_replaces_init_module() has been called. */
     PJ_ASSERT_RETURN(the_endpt != NULL, PJ_EINVALIDOP);
 
+	inst_id = rdata->tp_info.pool->factory->inst_id;
 
     /* Init output arguments */
     *p_dlg = NULL;
@@ -257,7 +265,7 @@ PJ_DEF(pj_status_t) pjsip_replaces_verify_request( pjsip_rx_data *rdata,
     /* Find the dialog identified by Replaces header (and always lock the
      * dialog no matter what application wants).
      */
-    dlg = pjsip_ua_find_dialog(&rep_hdr->call_id, &rep_hdr->to_tag,
+    dlg = pjsip_ua_find_dialog(inst_id, &rep_hdr->call_id, &rep_hdr->to_tag,
 			       &rep_hdr->from_tag, PJ_TRUE);
 
     /* Respond with 481 "Call/Transaction Does Not Exist" response if
@@ -329,7 +337,7 @@ on_return:
 	    pjsip_tx_data *tdata;
 	    const pjsip_hdr *h;
 
-	    status = pjsip_endpt_create_response(the_endpt, rdata, code, 
+	    status = pjsip_endpt_create_response(the_endpt[inst_id], rdata, code, 
 						 NULL, &tdata);
 
 	    if (status != PJ_SUCCESS)
@@ -354,7 +362,7 @@ on_return:
 		pj_str_t warn_value = pj_str((char*)warn_text);
 
 		warn_hdr=pjsip_warning_hdr_create(tdata->pool, 399, 
-						  pjsip_endpt_name(the_endpt),
+						  pjsip_endpt_name(the_endpt[inst_id]),
 						  &warn_value);
 		pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr*)warn_hdr);
 	    }

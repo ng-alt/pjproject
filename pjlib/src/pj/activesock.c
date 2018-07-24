@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: activesock.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -25,6 +25,8 @@
 #include <pj/pool.h>
 #include <pj/sock.h>
 #include <pj/string.h>
+
+#define THIS_FILE "activesock.c"
 
 #if defined(PJ_IPHONE_OS_HAS_MULTITASKING_SUPPORT) && \
     PJ_IPHONE_OS_HAS_MULTITASKING_SUPPORT!=0
@@ -218,7 +220,8 @@ PJ_DEF(pj_status_t) pj_activesock_create( pj_pool_t *pool,
     
     if (asock->whole_data) {
 	/* Must disable concurrency otherwise there is a race condition */
-	pj_ioqueue_set_concurrency(asock->key, 0);
+	// DEAN force to enable concurrency to solve dead-lock
+    pj_ioqueue_set_concurrency(asock->key, 1);
     } else if (opt && opt->concurrency >= 0) {
 	pj_ioqueue_set_concurrency(asock->key, opt->concurrency);
     }
@@ -591,10 +594,23 @@ static void ioqueue_on_read_complete(pj_ioqueue_key_t *key,
 	    status = pj_ioqueue_recv(key, op_key, r->pkt + r->size, 
 				     &bytes_read, flags);
 	} else {
+		//pj_uint32_t pkt_id;
 	    r->src_addr_len = sizeof(r->src_addr);
 	    status = pj_ioqueue_recvfrom(key, op_key, r->pkt + r->size,
 				         &bytes_read, flags,
-					 &r->src_addr, &r->src_addr_len);
+						 &r->src_addr, &r->src_addr_len);
+		
+		/*if (status == PJ_SUCCESS) {
+			if(bytes_read> 1000) {
+				pkt_id = pj_ntohl(((pj_uint32_t*)(r->pkt + r->size + 6))[0]);
+				PJ_LOG(4, (THIS_FILE, "bytes_read=[%d], pkt_id=[%d], loop=[%d], status=[%d]", bytes_read, pkt_id, loop, status));
+			} else {
+				pkt_id = pj_ntohl(((pj_uint32_t*)(r->pkt + r->size + 6))[0]);
+				PJ_LOG(4, (THIS_FILE, "bytes_read=[%d], pkt_id=[%d], loop=[%d], status=[%d]", bytes_read, pkt_id, loop, status));
+			}
+		} else if (status != PJ_SUCCESS) {
+			PJ_LOG(4, (THIS_FILE, "loop=[%d], status=[%d]", loop, status));
+		}*/
 	}
 
 	if (status == PJ_SUCCESS) {
@@ -658,7 +674,7 @@ PJ_DEF(pj_status_t) pj_activesock_send( pj_activesock_t *asock,
 
 	status = pj_ioqueue_send(asock->key, send_key, data, size, flags);
 	if (status != PJ_SUCCESS) {
-	    /* Pending or error */
+            /* Pending or error */
 	    return status;
 	}
 
@@ -677,10 +693,10 @@ PJ_DEF(pj_status_t) pj_activesock_send( pj_activesock_t *asock,
 	/* Try again */
 	status = send_remaining(asock, send_key);
 	if (status == PJ_SUCCESS) {
-	    *size = whole;
+		*size = whole;
 	}
 	return status;
-
+	
     } else {
 	return pj_ioqueue_send(asock->key, send_key, data, size, flags);
     }
@@ -712,38 +728,38 @@ static void ioqueue_on_write_complete(pj_ioqueue_key_t *key,
     asock = (pj_activesock_t*) pj_ioqueue_get_user_data(key);
 
     if (bytes_sent > 0 && op_key->activesock_data) {
-	/* whole_data is requested. Make sure we send all the data */
-	struct send_data *sd = (struct send_data*)op_key->activesock_data;
+        /* whole_data is requested. Make sure we send all the data */
+        struct send_data *sd = (struct send_data*)op_key->activesock_data;
 
-	sd->sent += bytes_sent;
-	if (sd->sent == sd->len) {
-	    /* all has been sent */
-	    bytes_sent = sd->sent;
-	    op_key->activesock_data = NULL;
-	} else {
-	    /* send remaining data */
-	    pj_status_t status;
+        sd->sent += bytes_sent;
+        if (sd->sent == sd->len) {
+            /* all has been sent */
+            bytes_sent = sd->sent;
+            op_key->activesock_data = NULL;
+        } else {
+            /* send remaining data */
+            pj_status_t status;
 
-	    status = send_remaining(asock, op_key);
-	    if (status == PJ_EPENDING)
-		return;
-	    else if (status == PJ_SUCCESS)
-		bytes_sent = sd->sent;
-	    else
-		bytes_sent = -status;
+            status = send_remaining(asock, op_key);
+            if (status == PJ_EPENDING)
+                return;
+            else if (status == PJ_SUCCESS)
+                bytes_sent = sd->sent;
+            else
+                bytes_sent = -status;
 
-	    op_key->activesock_data = NULL;
-	}
-    } 
+            op_key->activesock_data = NULL;
+        }
+    }
 
     if (asock->cb.on_data_sent) {
-	pj_bool_t ret;
+        pj_bool_t ret;
 
-	ret = (*asock->cb.on_data_sent)(asock, op_key, bytes_sent);
+        ret = (*asock->cb.on_data_sent)(asock, op_key, bytes_sent);
 
-	/* If callback returns false, we have been destroyed! */
-	if (!ret)
-	    return;
+        /* If callback returns false, we have been destroyed! */
+        if (!ret)
+            return;
     }
 }
 

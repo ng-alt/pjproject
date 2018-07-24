@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_win32_wince.h 3822 2011-10-18 04:26:37Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -111,7 +111,7 @@
 
 #define PJ_HAS_HIGH_RES_TIMER	    1
 #define PJ_HAS_MALLOC               1
-#define PJ_OS_HAS_CHECK_STACK	    1
+#define PJ_OS_HAS_CHECK_STACK	    0
 
 #define PJ_ATOMIC_VALUE_TYPE	    long
 

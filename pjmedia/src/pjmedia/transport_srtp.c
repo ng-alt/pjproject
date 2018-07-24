@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: transport_srtp.c 4387 2013-02-27 10:16:08Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -37,7 +37,7 @@
 /* Maximum size of packet */
 #define MAX_RTP_BUFFER_LEN	    1500
 #define MAX_RTCP_BUFFER_LEN	    1500
-#define MAX_KEY_LEN		    32
+#define MAX_KEY_LEN		    128
 
 /* Initial value of probation counter. When probation counter > 0, 
  * it means SRTP is in probation state, and it may restart when
@@ -270,9 +270,9 @@ const char* get_libsrtp_errstr(int err)
 }
 
 static pj_bool_t libsrtp_initialized;
-static void pjmedia_srtp_deinit_lib(void);
+static void pjmedia_srtp_deinit_lib(pjmedia_endpt *endpt);
 
-PJ_DEF(pj_status_t) pjmedia_srtp_init_lib(void)
+PJ_DEF(pj_status_t) pjmedia_srtp_init_lib(pjmedia_endpt *endpt)
 {
     if (libsrtp_initialized == PJ_FALSE) {
 	err_status_t err;
@@ -281,10 +281,11 @@ PJ_DEF(pj_status_t) pjmedia_srtp_init_lib(void)
 	if (err != err_status_ok) { 
 	    PJ_LOG(4, (THIS_FILE, "Failed to initialize libsrtp: %s", 
 		       get_libsrtp_errstr(err)));
-	    return PJMEDIA_ERRNO_FROM_LIBSRTP(err);
+	    //return PJMEDIA_ERRNO_FROM_LIBSRTP(err);
 	}
 
-	if (pj_atexit(pjmedia_srtp_deinit_lib) != PJ_SUCCESS) {
+	if (pjmedia_endpt_atexit(endpt, pjmedia_srtp_deinit_lib) != PJ_SUCCESS)
+	{
 	    /* There will be memory leak when it fails to schedule libsrtp 
 	     * deinitialization, however the memory leak could be harmless,
 	     * since in modern OS's memory used by an application is released 
@@ -299,9 +300,18 @@ PJ_DEF(pj_status_t) pjmedia_srtp_init_lib(void)
     return PJ_SUCCESS;
 }
 
-static void pjmedia_srtp_deinit_lib(void)
+static void pjmedia_srtp_deinit_lib(pjmedia_endpt *endpt)
 {
     err_status_t err;
+
+    /* Note that currently this SRTP init/deinit is not equipped with
+     * reference counter, it should be safe as normally there is only
+     * one single instance of media endpoint and even if it isn't, the
+     * pjmedia_transport_srtp_create() will invoke SRTP init (the only
+     * drawback should be the delay described by #788).
+     */
+
+    PJ_UNUSED_ARG(endpt);
 
     err = srtp_deinit();
     if (err != err_status_ok) {
@@ -410,7 +420,7 @@ PJ_DEF(pj_status_t) pjmedia_transport_srtp_create(
     }
 
     /* Init libsrtp. */
-    status = pjmedia_srtp_init_lib();
+    status = pjmedia_srtp_init_lib(endpt);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -601,19 +611,47 @@ PJ_DEF(pj_status_t) pjmedia_transport_srtp_start(
     /* Declare SRTP session initialized */
     srtp->session_inited = PJ_TRUE;
 
-    PJ_LOG(5, (srtp->pool->obj_name, "TX: %s key=%s", srtp->tx_policy.name.ptr,
-	       octet_string_hex_string(tx->key.ptr, tx->key.slen)));
+    /* Logging stuffs */
+#if PJ_LOG_MAX_LEVEL >= 5
+    {
+	char b64[PJ_BASE256_TO_BASE64_LEN(MAX_KEY_LEN)];
+	int b64_len;
+
+	/* TX crypto and key */
+	b64_len = sizeof(b64);
+	status = pj_base64_encode((pj_uint8_t*)tx->key.ptr, tx->key.slen,
+				  b64, &b64_len);
+	if (status != PJ_SUCCESS)
+	    b64_len = pj_ansi_sprintf(b64, "--key too long--");
+	else
+	    b64[b64_len] = '\0';
+        
+	PJ_LOG(5, (srtp->pool->obj_name, "TX: %s key=%s",
+		   srtp->tx_policy.name.ptr, b64));
     if (srtp->tx_policy.flags) {
-	PJ_LOG(5,(srtp->pool->obj_name,"TX: disable%s%s", (cr_tx_idx?"":" enc"),
+	    PJ_LOG(5,(srtp->pool->obj_name, "TX: disable%s%s",
+		      (cr_tx_idx?"":" enc"),
 		  (au_tx_idx?"":" auth")));
     }
 
-    PJ_LOG(5, (srtp->pool->obj_name, "RX: %s key=%s", srtp->rx_policy.name.ptr,
-	       octet_string_hex_string(rx->key.ptr, rx->key.slen)));
+	/* RX crypto and key */
+	b64_len = sizeof(b64);
+	status = pj_base64_encode((pj_uint8_t*)rx->key.ptr, rx->key.slen,
+				  b64, &b64_len);
+	if (status != PJ_SUCCESS)
+	    b64_len = pj_ansi_sprintf(b64, "--key too long--");
+	else
+	    b64[b64_len] = '\0';
+
+	PJ_LOG(5, (srtp->pool->obj_name, "RX: %s key=%s",
+		   srtp->rx_policy.name.ptr, b64));
     if (srtp->rx_policy.flags) {
-	PJ_LOG(5,(srtp->pool->obj_name,"RX: disable%s%s", (cr_rx_idx?"":" enc"),
+	    PJ_LOG(5,(srtp->pool->obj_name,"RX: disable%s%s",
+		      (cr_rx_idx?"":" enc"),
 		  (au_rx_idx?"":" auth")));
     }
+    }
+#endif
 
 on_return:
     pj_lock_release(srtp->mutex);
@@ -910,16 +948,19 @@ static void srtp_rtp_cb( void *user_data, void *pkt, pj_ssize_t size)
 	* & SRTP is restarted), but some old packets are still coming 
 	* so SRTP is learning wrong RTP seq. While the newly inited RTP seq
 	* comes, SRTP thinks the RTP seq is replayed, so srtp_unprotect() 
-	* will returning err_status_replay_*. Restarting SRTP can resolve 
-	* this.
+	 * will return err_status_replay_*. Restarting SRTP can resolve this.
 	*/
-	if (pjmedia_transport_srtp_start((pjmedia_transport*)srtp, 
-					 &srtp->tx_policy, &srtp->rx_policy) 
-					 != PJ_SUCCESS)
-	{
+	pjmedia_srtp_crypto tx, rx;
+	pj_status_t status;
+
+	tx = srtp->tx_policy;
+	rx = srtp->rx_policy;
+	status = pjmedia_transport_srtp_start((pjmedia_transport*)srtp,
+					      &tx, &rx);
+	if (status != PJ_SUCCESS) {
 	    PJ_LOG(5,(srtp->pool->obj_name, "Failed to restart SRTP, err=%s", 
 		      get_libsrtp_errstr(err)));
-	} else {
+	} else if (!srtp->bypass_srtp) {
 	    err = srtp_unprotect(srtp->srtp_rx_ctx, (pj_uint8_t*)pkt, &len);
 	}
     }
@@ -1205,6 +1246,9 @@ BYPASS_SRTP:
     member_tp_option &= ~PJMEDIA_TPMED_NO_TRANSPORT_CHECKING;
 
 PROPAGATE_MEDIA_CREATE:
+	// DEAN assign app's lock object.
+	srtp->member_tp->app_lock = srtp->base.app_lock;
+	srtp->member_tp->call_id = srtp->base.call_id;
     return pjmedia_transport_media_create(srtp->member_tp, sdp_pool, 
 					  member_tp_option, sdp_remote,
 					  media_index);

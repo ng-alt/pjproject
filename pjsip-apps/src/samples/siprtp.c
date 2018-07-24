@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: siprtp.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -292,7 +292,7 @@ static pj_status_t init_sip()
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&app.cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &app.cp, &pj_pool_factory_default_policy, 0);
 
     /* Create application pool for misc. */
     app.pool = pj_pool_create(&app.cp.factory, "app", 1000, 1000, NULL);
@@ -421,11 +421,13 @@ static pj_status_t init_media()
      * initialized.
      */
 #if PJ_HAS_THREADS
-    status = pjmedia_endpt_create(&app.cp.factory, NULL, 1, &app.med_endpt);
+    //status = pjmedia_endpt_create(&app.cp.factory, NULL, 1, &app.med_endpt);
+    status = pjmedia_endpt_create(0, &app.cp.factory, NULL, 1, 0, &app.med_endpt);
 #else
-    status = pjmedia_endpt_create(&app.cp.factory, 
+    status = pjmedia_endpt_create(0, &app.cp.factory,
 				  pjsip_endpt_get_ioqueue(app.sip_endpt),
-				  0, &app.med_endpt);
+				  //0, &app.med_endpt);
+				  0, 0, &app.med_endpt);
 #endif
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
@@ -533,7 +535,7 @@ static pj_status_t make_call(const pj_str_t *dst_uri)
     call = &app.call[i];
 
     /* Create UAC dialog */
-    status = pjsip_dlg_create_uac( pjsip_ua_instance(), 
+    status = pjsip_dlg_create_uac( 0, pjsip_ua_instance(0),
 				   &app.local_uri,	/* local URI	    */
 				   &app.local_contact,	/* local Contact    */
 				   dst_uri,		/* remote URI	    */
@@ -575,7 +577,7 @@ static pj_status_t make_call(const pj_str_t *dst_uri)
      * From now on, the invite session's state will be reported to us
      * via the invite session callbacks.
      */
-    status = pjsip_inv_send_msg(call->inv, tdata);
+    status = pjsip_inv_send_msg(0, call->inv, tdata);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
@@ -637,8 +639,8 @@ static void process_incoming_call(pjsip_rx_data *rdata)
     }
 
     /* Create UAS dialog */
-    status = pjsip_dlg_create_uas( pjsip_ua_instance(), rdata,
-				   &app.local_contact, &dlg);
+    status = pjsip_dlg_create_uas( 0, pjsip_ua_instance(0), rdata,
+				   &app.local_contact, NULL, &dlg);
     if (status != PJ_SUCCESS) {
 	const pj_str_t reason = pj_str("Unable to create dialog");
 	pjsip_endpt_respond_stateless( app.sip_endpt, rdata, 
@@ -675,15 +677,15 @@ static void process_incoming_call(pjsip_rx_data *rdata)
 					  PJSIP_SC_NOT_ACCEPTABLE,
 					  NULL, NULL, &tdata);
 	if (status == PJ_SUCCESS)
-	    pjsip_inv_send_msg(call->inv, tdata); 
+	    pjsip_inv_send_msg(0, call->inv, tdata);
 	else
-	    pjsip_inv_terminate(call->inv, 500, PJ_FALSE);
+	    pjsip_inv_terminate(0, call->inv, 500, PJ_FALSE);
 	return;
     }
 
 
     /* Send the 200 response. */  
-    status = pjsip_inv_send_msg(call->inv, tdata); 
+    status = pjsip_inv_send_msg(0, call->inv, tdata);
     PJ_ASSERT_ON_FAIL(status == PJ_SUCCESS, return);
 
 
@@ -1133,7 +1135,12 @@ static void boost_priority(void)
 		    PJ_RETURN_OS_ERROR(rc));
 	return;
     }
+
+#if PJ_ANDROID==1
+	tp.sched_priority = max_prio;
+#else
     tp.__sched_priority = max_prio;
+#endif
 
     rc = sched_setscheduler(0, POLICY, &tp);
     if (rc != 0) {
@@ -1141,9 +1148,10 @@ static void boost_priority(void)
 		    PJ_RETURN_OS_ERROR(rc));
     }
 
+#if !defined(PJ_ANDROID)
     PJ_LOG(4, (THIS_FILE, "New process policy=%d, priority=%d",
 	      policy, tp.__sched_priority));
-
+#endif
     /*
      * Adjust thread scheduling algorithm and priority
      */
@@ -1154,11 +1162,19 @@ static void boost_priority(void)
 	return;
     }
 
+#if !defined(PJ_ANDROID)
     PJ_LOG(4, (THIS_FILE, "Old thread policy=%d, priority=%d",
 	      policy, tp.__sched_priority));
 
+#endif
+
     policy = POLICY;
+
+#if PJ_ANDROID==1
+    tp.sched_priority = max_prio;
+#else
     tp.__sched_priority = max_prio;
+#endif
 
     rc = pthread_setschedparam(pthread_self(), policy, &tp);
     if (rc != 0) {
@@ -1167,8 +1183,11 @@ static void boost_priority(void)
 	return;
     }
 
+#if !defined(PJ_ANDROID)
     PJ_LOG(4, (THIS_FILE, "New thread policy=%d, priority=%d",
 	      policy, tp.__sched_priority));
+#endif
+
 }
 
 #else
@@ -1835,9 +1854,9 @@ static void hangup_call(unsigned index)
     if (app.call[index].inv == NULL)
 	return;
 
-    status = pjsip_inv_end_session(app.call[index].inv, 603, NULL, &tdata);
+    status = pjsip_inv_end_session(0, app.call[index].inv, 603, NULL, &tdata);
     if (status==PJ_SUCCESS && tdata!=NULL)
-	pjsip_inv_send_msg(app.call[index].inv, tdata);
+	pjsip_inv_send_msg(0, app.call[index].inv, tdata);
 }
 
 static void hangup_all_calls()
@@ -2016,12 +2035,12 @@ static pjsip_module msg_logger =
 static FILE *log_file;
 
 
-static void app_log_writer(int level, const char *buffer, int len)
+static void app_log_writer(int inst_id, int level, const char *buffer, int len)
 {
     /* Write to both stdout and file. */
 
     if (level <= app.app_log_level)
-	pj_log_write(level, buffer, len);
+	pj_log_write(inst_id, level, buffer, len, 0);
 
     if (log_file) {
 	int count = fwrite(buffer, len, 1, log_file);
@@ -2072,7 +2091,7 @@ int main(int argc, char *argv[])
     pj_status_t status;
 
     /* Must init PJLIB first */
-    status = pj_init();
+    status = pj_init(0);
     if (status != PJ_SUCCESS)
 	return 1;
 
@@ -2182,8 +2201,7 @@ int main(int argc, char *argv[])
     app_logging_shutdown();
 
     /* Shutdown PJLIB */
-    pj_shutdown();
+    pj_shutdown(0);
 
     return 0;
 }
-

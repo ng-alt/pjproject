@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_time_win32.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -173,6 +173,33 @@ static pj_status_t get_base_time(void)
 #endif
 
     return status;
+}
+
+#if defined(_MSC_VER) || defined(__BORLANDC__)
+#define EPOCHFILETIME (116444736000000000i64)
+#else
+#define EPOCHFILETIME (116444736000000000LL)
+#endif
+
+PJ_DEF(pj_status_t) pj_gettimeofday2(pj_time_val2 *tv)
+{
+    FILETIME        ft;
+    LARGE_INTEGER   li;
+    __int64         t;
+    static int      tzflag;
+
+    if (tv) {
+        GetSystemTimeAsFileTime(&ft);
+        li.LowPart  = ft.dwLowDateTime;
+        li.HighPart = ft.dwHighDateTime;
+        t  = li.QuadPart;       /* In 100-nanosecond intervals */
+        t -= EPOCHFILETIME;     /* Offset to the Epoch time */
+        t /= 10;                /* In microseconds */
+        tv->sec  = (long)(t / 1000000);
+        tv->usec = (long)(t % 1000000);
+    }
+
+    return 0;
 }
 
 PJ_DEF(pj_status_t) pj_gettimeofday(pj_time_val *tv)

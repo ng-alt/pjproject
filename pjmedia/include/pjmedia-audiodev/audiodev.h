@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: audiodev.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -527,7 +527,7 @@ PJ_DECL(pj_status_t) pjmedia_aud_subsys_shutdown(void);
  *			error code.
  */
 PJ_DECL(pj_status_t)
-pjmedia_aud_register_factory(pjmedia_aud_dev_factory_create_func_ptr adf);
+pjmedia_aud_register_factory( pjmedia_aud_dev_factory_create_func_ptr adf);
 
 
 /**

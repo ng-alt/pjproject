@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: transport_adapter_sample.h 3804 2011-10-09 10:58:38Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>

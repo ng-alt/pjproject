@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_parser.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -61,7 +61,7 @@ enum
 /**
  * Parser syntax error exception value.
  */
-extern int PJSIP_SYN_ERR_EXCEPTION;
+extern int PJSIP_SYN_ERR_EXCEPTION[PJSUA_MAX_INSTANCES];
 
 /**
  * This structure is used to get error reporting from parser.
@@ -120,13 +120,15 @@ typedef void* (pjsip_parse_uri_func)(pj_scanner *scanner, pj_pool_t *pool,
  * specification of header parser handler function. New registration 
  * overwrites previous registration with the same name.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param hname		The header name.
  * @param hshortname	The short header name or NULL.
  * @param fptr		The pointer to function to parser the header.
  *
  * @return		PJ_SUCCESS if success, or the appropriate error code.
  */
-PJ_DECL(pj_status_t) pjsip_register_hdr_parser( const char *hname,
+PJ_DECL(pj_status_t) pjsip_register_hdr_parser( int inst_id,
+						const char *hname,
 						const char *hshortname,
 						pjsip_parse_hdr_func *fptr);
 
@@ -148,12 +150,14 @@ PJ_DECL(pj_status_t) pjsip_unregister_hdr_parser( const char *hname,
 /**
  * Register URI scheme parser handler.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param scheme	The URI scheme registered.
  * @param func		The URI parser function.
  *
  * @return		zero on success.
  */
-PJ_DECL(pj_status_t) pjsip_register_uri_parser( char *scheme,
+PJ_DECL(pj_status_t) pjsip_register_uri_parser( int inst_id,
+							char *scheme,
 					        pjsip_parse_uri_func *func);
 
 /**
@@ -172,6 +176,7 @@ PJ_DECL(pj_status_t) pjsip_unregister_uri_parser( const char *scheme,
 /**
  * Parse an URI in the input and return the correct instance of URI.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool		The pool to get memory allocations.
  * @param buf		The input buffer, which MUST be NULL terminated.
  * @param size		The length of the string (not counting NULL terminator).
@@ -185,20 +190,23 @@ PJ_DECL(pj_status_t) pjsip_unregister_uri_parser( const char *scheme,
  * @return		The URI or NULL when failed. No exception is thrown by 
  *			this function (or any public parser functions).
  */
-PJ_DECL(pjsip_uri*) pjsip_parse_uri( pj_pool_t *pool, 
+PJ_DECL(pjsip_uri*) pjsip_parse_uri( int inst_id,
+					 pj_pool_t *pool, 
 				     char *buf, pj_size_t size,
 				     unsigned options);
 
 /**
  * Parse SIP status line.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param buf		Text buffer to parse, which MUST be NULL terminated.
  * @param size		The size of the buffer, excluding the NULL character.
  * @param status_line	Structure to receive the parsed elements.
  *
  * @return		PJ_SUCCESS if a status line is parsed successfully.
  */
-PJ_DECL(pj_status_t) pjsip_parse_status_line(char *buf, pj_size_t size,
+PJ_DECL(pj_status_t) pjsip_parse_status_line(int inst_id,
+						 char *buf, pj_size_t size,
 					     pjsip_status_line *status_line);
 
 
@@ -209,6 +217,7 @@ PJ_DECL(pj_status_t) pjsip_parse_status_line(char *buf, pj_size_t size,
  * treated as a text block, ie. the function will not try to parse the content
  * of the body.
  *
+ * @param inst_id   The instance id of pjusa.
  * @param pool		The pool to allocate memory.
  * @param buf		The input buffer, which MUST be NULL terminated.
  * @param size		The length of the string (not counting NULL terminator).
@@ -218,7 +227,8 @@ PJ_DECL(pj_status_t) pjsip_parse_status_line(char *buf, pj_size_t size,
  * @return		The message or NULL when failed. No exception is thrown
  *			by this function (or any public parser functions).
  */
-PJ_DECL(pjsip_msg *) pjsip_parse_msg( pj_pool_t *pool, 
+PJ_DECL(pjsip_msg *) pjsip_parse_msg( int inst_id,
+					  pj_pool_t *pool, 
 				      char *buf, pj_size_t size,
 				      pjsip_parser_err_report *err_list);
 
@@ -231,6 +241,7 @@ PJ_DECL(pjsip_msg *) pjsip_parse_msg( pj_pool_t *pool,
  *
  * This function is normally called by the transport layer.
  *
+ * @param inst_id   The instance id of pjusa.
  * @param buf		The input buffer, which MUST be NULL terminated.
  * @param size		The length of the string (not counting NULL terminator).
  * @param rdata         The receive data buffer to store the message and
@@ -238,13 +249,15 @@ PJ_DECL(pjsip_msg *) pjsip_parse_msg( pj_pool_t *pool,
  *
  * @return              The message inside the rdata if successfull, or NULL.
  */
-PJ_DECL(pjsip_msg *) pjsip_parse_rdata( char *buf, pj_size_t size,
-                                        pjsip_rx_data *rdata );
+PJ_DECL(pjsip_msg *) pjsip_parse_rdata( int inst_id,
+									   char *buf, pj_size_t size,
+                                       pjsip_rx_data *rdata );
 
 /**
  * Check incoming packet to see if a (probably) valid SIP message has been 
  * received.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param buf		The input buffer, which must be NULL terminated.
  * @param size		The buffer size.
  * @param is_datagram	Put non-zero if transport is datagram oriented.
@@ -253,7 +266,8 @@ PJ_DECL(pjsip_msg *) pjsip_parse_rdata( char *buf, pj_size_t size,
  *
  * @return		PJ_SUCCESS if a message is found, or an error code.
  */
-PJ_DECL(pj_status_t) pjsip_find_msg(const char *buf, 
+PJ_DECL(pj_status_t) pjsip_find_msg(int inst_id,
+									const char *buf, 
                                     pj_size_t size, 
 				    pj_bool_t is_datagram, 
                                     pj_size_t *msg_size);
@@ -263,6 +277,7 @@ PJ_DECL(pj_status_t) pjsip_find_msg(const char *buf,
  * This function parses the content of a header (ie. part after colon) according
  * to the expected name, and will return the correct instance of header.
  *
+ * @param inst_id   The instance id of pjusa.
  * @param pool		Pool to allocate memory for the header.
  * @param hname		Header name which is used to find the correct function
  *			to parse the header.
@@ -279,7 +294,8 @@ PJ_DECL(pj_status_t) pjsip_find_msg(const char *buf,
  * @return		The instance of the header if parsing was successful,
  *			or otherwise a NULL pointer will be returned.
  */
-PJ_DECL(void*) pjsip_parse_hdr( pj_pool_t *pool, const pj_str_t *hname,
+PJ_DECL(void*) pjsip_parse_hdr( int inst_id,
+				pj_pool_t *pool, const pj_str_t *hname,
 				char *line, pj_size_t size,
 				int *parsed_len);
 
@@ -289,6 +305,7 @@ PJ_DECL(void*) pjsip_parse_hdr( pj_pool_t *pool, const pj_str_t *hname,
  * a newline (as in SIP message) or ampersand mark (as in URI). This separator
  * is optional for the last header.
  *
+ * @param inst_id   The instance id of pjusa.
  * @param pool		The pool.
  * @param input		The input text to parse, which must be NULL terminated.
  * @param size		The text length.
@@ -303,7 +320,7 @@ PJ_DECL(void*) pjsip_parse_hdr( pj_pool_t *pool, const pj_str_t *hname,
  *			Upon error, the \a hlist argument MAY contain 
  *			successfully parsed headers.
  */
-PJ_DECL(pj_status_t) pjsip_parse_headers( pj_pool_t *pool, char *input,
+PJ_DECL(pj_status_t) pjsip_parse_headers( int inst_id, pj_pool_t *pool, char *input,
 				          pj_size_t size, pjsip_hdr *hlist,
 				          unsigned options);
 
@@ -338,8 +355,9 @@ typedef struct pjsip_parser_const_t
     const pj_str_t pjsip_RECEIVED_STR;	/**< "received" string const.   */
     const pj_str_t pjsip_Q_STR;		/**< "q" string constant.	*/
     const pj_str_t pjsip_EXPIRES_STR;	/**< "expires" string constant. */
-    const pj_str_t pjsip_TAG_STR;	/**< "tag" string constant.	*/
-    const pj_str_t pjsip_RPORT_STR;	/**< "rport" string const.	*/
+	const pj_str_t pjsip_TAG_STR;	/**< "tag" string constant.	*/
+	const pj_str_t pjsip_RPORT_STR;	/**< "rport" string const.	*/
+	const pj_str_t pjsip_TIMEOUT_STR;	/**< "timeout" string const.	*/
 
     pj_cis_t pjsip_HOST_SPEC;		/**< For scanning host part.	*/
     pj_cis_t pjsip_DIGIT_SPEC;		/**< Decimal digits		*/

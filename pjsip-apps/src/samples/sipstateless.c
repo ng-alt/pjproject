@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sipstateless.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
     pj_status_t status;
     
     /* Must init PJLIB first: */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
 
@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &cp, &pj_pool_factory_default_policy, 0);
 
     /* Create global endpoint: */
     {
@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
 	 */
 
 	/* Create the endpoint: */
-	status = pjsip_endpt_create(&cp.factory, "sipstateless", 
+	status = pjsip_endpt_create(&cp.factory, "sipstateless",
 				    &sip_endpt);
 	PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
     }

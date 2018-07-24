@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: guid_simple.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -49,18 +49,18 @@ static void init_guid_chars(void)
     *p++ = '.';
 }
 
-PJ_DEF(pj_str_t*) pj_generate_unique_string(pj_str_t *str)
+PJ_DEF(pj_str_t*) pj_generate_unique_string(int inst_id, pj_str_t *str)
 {
     char *p, *end;
 
     PJ_CHECK_STACK();
 
     if (guid_chars[0] == '\0') {
-	pj_enter_critical_section();
+	pj_enter_critical_section(inst_id);
 	if (guid_chars[0] == '\0') {
 	    init_guid_chars();
 	}
-	pj_leave_critical_section();
+	pj_leave_critical_section(inst_id);
     }
 
     /* This would only work if PJ_GUID_STRING_LENGTH is multiple of 2 bytes */

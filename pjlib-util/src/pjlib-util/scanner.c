@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: scanner.c 4375 2013-02-27 09:28:31Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -111,7 +111,7 @@ PJ_DEF(void) pj_cis_invert( pj_cis_t *cis )
     }
 }
 
-PJ_DEF(void) pj_scan_init( pj_scanner *scanner, char *bufstart, int buflen, 
+PJ_DEF(void) pj_scan_init( int inst_id, pj_scanner *scanner, char *bufstart, int buflen, 
 			   unsigned options, pj_syn_err_func_ptr callback )
 {
     PJ_CHECK_STACK();
@@ -122,6 +122,7 @@ PJ_DEF(void) pj_scan_init( pj_scanner *scanner, char *bufstart, int buflen,
     scanner->start_line = scanner->begin;
     scanner->callback = callback;
     scanner->skip_ws = options;
+	scanner->inst_id = inst_id;
 
     if (scanner->skip_ws) 
 	pj_scan_skip_whitespace(scanner);
@@ -393,7 +394,6 @@ PJ_DEF(void) pj_scan_get_quotes(pj_scanner *scanner,
 		    }
 		    /* break from main loop if we have odd number of backslashes */
 		    if (((unsigned)(q-r) & 0x01) == 1) {
-			++s;
 			break;
 		    }
 		    ++s;

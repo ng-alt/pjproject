@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: xml.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -73,13 +73,14 @@ struct pj_xml_node
  * XML comments ("<!--"), however such constructs will be ignored and will not 
  * be included in the resulted XML node tree.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool	    Pool to allocate memory from.
  * @param msg	    The XML message to parse.
  * @param len	    The length of the message.
  *
  * @return	    XML root node, or NULL if the XML document can not be parsed.
  */
-PJ_DECL(pj_xml_node*) pj_xml_parse( pj_pool_t *pool, char *msg, pj_size_t len);
+PJ_DECL(pj_xml_node*) pj_xml_parse( int inst_id, pj_pool_t *pool, char *msg, pj_size_t len);
 
 
 /**

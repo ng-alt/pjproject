@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_config.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -47,6 +47,8 @@ PJ_BEGIN_DECL
  */
 typedef struct pj_stun_config
 {
+	int inst_id;
+
     /**
      * Pool factory to be used.
      */
@@ -79,7 +81,9 @@ typedef struct pj_stun_config
      *
      * Default 10000 (10 seconds).
      */
-    unsigned		 res_cache_msec;
+	unsigned		 res_cache_msec;
+
+	int      enable_secure_data;        // secure data. 0 : disable secure data function, 1 enable secure data function
 
 } pj_stun_config;
 
@@ -88,7 +92,8 @@ typedef struct pj_stun_config
 /**
  * Initialize STUN config.
  */
-PJ_INLINE(void) pj_stun_config_init(pj_stun_config *cfg,
+PJ_INLINE(void) pj_stun_config_init(int inst_id,
+					pj_stun_config *cfg,
 				    pj_pool_factory *factory,
 				    unsigned options,
 				    pj_ioqueue_t *ioqueue,
@@ -102,6 +107,7 @@ PJ_INLINE(void) pj_stun_config_init(pj_stun_config *cfg,
     cfg->timer_heap = timer_heap;
     cfg->rto_msec = PJ_STUN_RTO_VALUE;
     cfg->res_cache_msec = PJ_STUN_RES_CACHE_DURATION;
+	cfg->inst_id = inst_id;
 }
 
 

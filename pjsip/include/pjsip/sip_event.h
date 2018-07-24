@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_event.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -96,7 +96,7 @@ struct pjsip_event
         /** Timer event. */
         struct
         {
-            pj_timer_entry *entry;      /**< The timer entry.           */
+            struct pj_timer_entry *entry;      /**< The timer entry.           */
         } timer;
 
         /** Transaction state has changed event. */
@@ -106,7 +106,7 @@ struct pjsip_event
             {
                 pjsip_rx_data   *rdata; /**< The incoming message.      */
                 pjsip_tx_data   *tdata; /**< The outgoing message.      */
-                pj_timer_entry  *timer; /**< The timer.                 */
+                struct pj_timer_entry  *timer; /**< The timer.                 */
                 pj_status_t      status;/**< Transport error status.    */
                 void            *data;  /**< Generic data.              */
             } src;
@@ -150,7 +150,9 @@ struct pjsip_event
             void                *user4; /**< User data 4.               */
         } user;
 
-    } body;
+	} body;
+
+	int natnl_flag; // 1: the flag for uas ip changed
 };
 
 /**
@@ -168,10 +170,11 @@ struct pjsip_event
 #define PJSIP_EVENT_INIT_TSX_STATE(event,ptsx,ptype,pdata,prev)   \
         do { \
             (event).type = PJSIP_EVENT_TSX_STATE;           \
-            (event).body.tsx_state.tsx = ptsx;		    \
+            (event).body.tsx_state.tsx = ptsx;				\
             (event).body.tsx_state.type = ptype;            \
             (event).body.tsx_state.src.data = pdata;        \
-	    (event).body.tsx_state.prev_state = prev;	    \
+			(event).body.tsx_state.prev_state = prev;	    \
+			(event).natnl_flag = 0;							\
         } while (0)
 
 /**

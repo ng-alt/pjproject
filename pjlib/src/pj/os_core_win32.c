@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: os_core_win32.c 4410 2013-03-01 03:46:45Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -61,6 +61,7 @@ struct pj_thread_t
     DWORD	    idthread;
     pj_thread_proc *proc;
     void	   *arg;
+	int         inst_id;
 
 #if defined(PJ_OS_HAS_CHECK_STACK) && PJ_OS_HAS_CHECK_STACK!=0
     pj_uint32_t	    stk_size;
@@ -82,11 +83,12 @@ struct pj_mutex_t
 #else
     HANDLE		hMutex;
 #endif
-    char		obj_name[PJ_MAX_OBJ_NAME];
+	char		obj_name[PJ_MAX_OBJ_NAME];
 #if PJ_DEBUG
     int		        nesting_level;
     pj_thread_t	       *owner;
 #endif
+	int                 inst_id;
 };
 
 /*
@@ -94,6 +96,7 @@ struct pj_mutex_t
  */
 typedef struct pj_sem_t
 {
+	int inst_id;
     HANDLE		hSemaphore;
     char		obj_name[PJ_MAX_OBJ_NAME];
 } pj_mem_t;
@@ -104,8 +107,9 @@ typedef struct pj_sem_t
  */
 struct pj_event_t
 {
+	int inst_id;
     HANDLE		hEvent;
-    char		obj_name[PJ_MAX_OBJ_NAME];
+	char		obj_name[PJ_MAX_OBJ_NAME];
 };
 
 /*
@@ -117,30 +121,61 @@ struct pj_atomic_t
 };
 
 /*
+ * Flag and reference counter for PJLIB instance.
+ */
+static int initialized[PJSUA_MAX_INSTANCES];
+
+/*
  * Static global variables.
  */
-static pj_thread_desc main_thread;
-static long thread_tls_id = -1;
-static pj_mutex_t critical_section_mutex;
-static unsigned atexit_count;
-static void (*atexit_func[32])(void);
+static pj_thread_desc main_thread[PJSUA_MAX_INSTANCES];
+static long thread_tls_id[PJSUA_MAX_INSTANCES];
+static pj_mutex_t critical_section_mutex[PJSUA_MAX_INSTANCES];
+static unsigned atexit_count[PJSUA_MAX_INSTANCES];
+static void (*atexit_func[PJSUA_MAX_INSTANCES][32])(int inst_id);
+
+static int is_initialized;
 
 /*
  * Some static prototypes.
  */
-static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name);
+static pj_status_t init_mutex(int inst_id, pj_mutex_t *mutex, const char *name);
+
+
+
+static void thread_tls_id_initialize()
+{
+	int i;
+	if(is_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(thread_tls_id); i++)
+	{
+		thread_tls_id[i] = -1;
+	}
+
+	is_initialized = 1;
+}
 
 
 /*
  * pj_init(void).
  * Init PJLIB!
  */
-PJ_DEF(pj_status_t) pj_init(void)
+PJ_DEF(pj_status_t) pj_init(int inst_id)
 {
     WSADATA wsa;
     char dummy_guid[32]; /* use maximum GUID length */
     pj_str_t guid;
     pj_status_t rc;
+
+	thread_tls_id_initialize();
+
+    /* Check if PJLIB have been initialized */
+    if (initialized[inst_id]) {
+	++initialized[inst_id];
+	return PJ_SUCCESS;
+    }
 
     /* Init Winsock.. */
     if (WSAStartup(MAKEWORD(2,0), &wsa) != 0) {
@@ -148,29 +183,29 @@ PJ_DEF(pj_status_t) pj_init(void)
     }
 
     /* Init this thread's TLS. */
-    if ((rc=pj_thread_init()) != PJ_SUCCESS) {
+    if ((rc=pj_thread_init(inst_id)) != PJ_SUCCESS) {
 	return rc;
     }
     
     /* Init logging */
-    pj_log_init();
+    pj_log_init(inst_id);
 
     /* Init random seed. */
     /* Or probably not. Let application in charge of this */
     /* pj_srand( GetCurrentProcessId() ); */
 
     /* Initialize critical section. */
-    if ((rc=init_mutex(&critical_section_mutex, "pj%p")) != PJ_SUCCESS)
+    if ((rc=init_mutex(inst_id, &critical_section_mutex[inst_id], "pj%p")) != PJ_SUCCESS)
 	return rc;
 
     /* Startup GUID. */
     guid.ptr = dummy_guid;
-    pj_generate_unique_string( &guid );
+    pj_generate_unique_string( inst_id, &guid );
 
     /* Initialize exception ID for the pool. 
      * Must do so after critical section is configured.
      */
-    rc = pj_exception_id_alloc("PJLIB/No memory", &PJ_NO_MEMORY_EXCEPTION);
+    rc = pj_exception_id_alloc(inst_id, "PJLIB/No memory", &PJ_NO_MEMORY_EXCEPTION);
     if (rc != PJ_SUCCESS)
         return rc;
 
@@ -187,6 +222,10 @@ PJ_DEF(pj_status_t) pj_init(void)
     }
 #endif   
 
+    /* Flag PJLIB as initialized */
+    ++initialized[inst_id];
+    pj_assert(initialized[inst_id] == 1);
+
     PJ_LOG(4,(THIS_FILE, "pjlib %s for win32 initialized",
 	      PJ_VERSION));
 
@@ -196,12 +235,12 @@ PJ_DEF(pj_status_t) pj_init(void)
 /*
  * pj_atexit()
  */
-PJ_DEF(pj_status_t) pj_atexit(void (*func)(void))
+PJ_DEF(pj_status_t) pj_atexit(int inst_id, void (*func)(int inst_id))
 {
-    if (atexit_count >= PJ_ARRAY_SIZE(atexit_func))
+    if (atexit_count[inst_id] >= PJ_ARRAY_SIZE(atexit_func))
 	return PJ_ETOOMANY;
 
-    atexit_func[atexit_count++] = func;
+    atexit_func[inst_id][atexit_count[inst_id]++] = func;
     return PJ_SUCCESS;
 }
 
@@ -209,9 +248,14 @@ PJ_DEF(pj_status_t) pj_atexit(void (*func)(void))
 /*
  * pj_shutdown(void)
  */
-PJ_DEF(void) pj_shutdown()
+PJ_DEF(void) pj_shutdown(int inst_id)
 {
     int i;
+
+    /* Only perform shutdown operation when 'initialized' reaches zero */
+    pj_assert(initialized[inst_id] > 0);
+    if (--initialized[inst_id] != 0)
+	return;
 
     /* Display stack usage */
 #if defined(PJ_OS_HAS_CHECK_STACK) && PJ_OS_HAS_CHECK_STACK!=0
@@ -223,34 +267,34 @@ PJ_DEF(void) pj_shutdown()
 #endif
 
     /* Call atexit() functions */
-    for (i=atexit_count-1; i>=0; --i) {
-	(*atexit_func[i])();
+    for (i=atexit_count[inst_id]-1; i>=0; --i) {
+	(*atexit_func[inst_id][i])(inst_id);
     }
-    atexit_count = 0;
+    atexit_count[inst_id] = 0;
 
     /* Free exception ID */
     if (PJ_NO_MEMORY_EXCEPTION != -1) {
-	pj_exception_id_free(PJ_NO_MEMORY_EXCEPTION);
+	pj_exception_id_free(inst_id, PJ_NO_MEMORY_EXCEPTION);
 	PJ_NO_MEMORY_EXCEPTION = -1;
     }
 
     /* Destroy PJLIB critical section */
-    pj_mutex_destroy(&critical_section_mutex);
+    pj_mutex_destroy(&critical_section_mutex[inst_id]);
 
     /* Free PJLIB TLS */
-    if (thread_tls_id != -1) {
-	pj_thread_local_free(thread_tls_id);
-	thread_tls_id = -1;
+    if (thread_tls_id[inst_id] != -1) {
+	pj_thread_local_free(thread_tls_id[inst_id]);
+	thread_tls_id[inst_id] = -1;
     }
 
     /* Clear static variables */
-    pj_errno_clear_handlers();
+    pj_errno_clear_handlers(); // INST_TODO
 
     /* Ticket #1132: Assertion when (re)starting PJLIB on different thread */
-    pj_bzero(main_thread, sizeof(main_thread));
+    pj_bzero(main_thread[inst_id], sizeof(main_thread[inst_id]));
 
     /* Shutdown Winsock */
-    WSACleanup();
+    WSACleanup();  // INST_TODO
 }
 
 
@@ -263,12 +307,22 @@ PJ_DEF(pj_uint32_t) pj_getpid(void)
     return GetCurrentProcessId();
 }
 
+
+/*
+ * pj_gettid(void)
+ */
+PJ_DEF(pj_uint32_t) pj_gettid(void)
+{
+    PJ_CHECK_STACK();
+    return GetCurrentThreadId();
+}
+
 /*
  * Check if this thread has been registered to PJLIB.
  */
-PJ_DEF(pj_bool_t) pj_thread_is_registered(void)
+PJ_DEF(pj_bool_t) pj_thread_is_registered(int inst_id)
 {
-    return pj_thread_local_get(thread_tls_id) != 0;
+    return pj_thread_local_get(thread_tls_id[inst_id]) != 0;
 }
 
 
@@ -341,10 +395,23 @@ PJ_DEF(void*) pj_thread_get_os_handle(pj_thread_t *thread)
 #endif
 }
 
+PJ_DEF(void*) pj_thread_get_thread_id(pj_thread_t *thread)
+{
+	PJ_ASSERT_RETURN(thread, NULL);
+
+#if PJ_HAS_THREADS
+	return &thread->idthread;
+#else
+	pj_assert("pj_thread_is_registered() called in non-threading mode!");
+	return NULL;
+#endif
+}
+
 /*
  * pj_thread_register(..)
  */
-PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
+PJ_DEF(pj_status_t) pj_thread_register ( int inst_id, 
+										const char *cstr_thread_name,
 					 pj_thread_desc desc,
                                          pj_thread_t **thread_ptr)
 {
@@ -360,14 +427,14 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
     }
 
     /* If a thread descriptor has been registered before, just return it. */
-    if (pj_thread_local_get (thread_tls_id) != 0) {
+    if (pj_thread_local_get (thread_tls_id[inst_id]) != 0) {
 	// 2006-02-26 bennylp:
 	//  This wouldn't work in all cases!.
 	//  If thread is created by external module (e.g. sound thread),
 	//  thread may be reused while the pool used for the thread descriptor
 	//  has been deleted by application.
 	//*thread_ptr = (pj_thread_t*)pj_thread_local_get (thread_tls_id);
-        //return PJ_SUCCESS;
+       return PJ_SUCCESS;
     }
 
     /* Initialize and set the thread entry. */
@@ -390,7 +457,7 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
 	pj_ansi_snprintf(thread->obj_name, sizeof(thread->obj_name), 
 		         "thr%p", (void*)thread->idthread);
     
-    rc = pj_thread_local_set(thread_tls_id, thread);
+    rc = pj_thread_local_set(thread_tls_id[inst_id], thread);
     if (rc != PJ_SUCCESS)
 	return rc;
 
@@ -401,16 +468,16 @@ PJ_DEF(pj_status_t) pj_thread_register ( const char *cstr_thread_name,
 /*
  * pj_thread_init(void)
  */
-pj_status_t pj_thread_init(void)
+pj_status_t pj_thread_init(int inst_id)
 {
     pj_status_t rc;
     pj_thread_t *thread;
 
-    rc = pj_thread_local_alloc(&thread_tls_id);
+    rc = pj_thread_local_alloc(&thread_tls_id[inst_id]);
     if (rc != PJ_SUCCESS)
 	return rc;
 
-    return pj_thread_register("thr%p", main_thread, &thread);
+    return pj_thread_register(inst_id, "thr%p", main_thread[inst_id], &thread);
 }
 
 static DWORD WINAPI thread_main(void *param)
@@ -422,7 +489,7 @@ static DWORD WINAPI thread_main(void *param)
     rec->stk_start = (char*)&rec;
 #endif
 
-    if (pj_thread_local_set(thread_tls_id, rec) != PJ_SUCCESS) {
+    if (pj_thread_local_set(thread_tls_id[rec->inst_id], rec) != PJ_SUCCESS) {
 	pj_assert(!"TLS is not set (pj_init() error?)");
     }
 
@@ -432,8 +499,9 @@ static DWORD WINAPI thread_main(void *param)
 
     PJ_LOG(6,(rec->obj_name, "Thread quitting"));
 #if defined(PJ_OS_HAS_CHECK_STACK) && PJ_OS_HAS_CHECK_STACK!=0
-    PJ_LOG(5,(rec->obj_name, "Thread stack max usage=%u by %s:%d", 
-	      rec->stk_max_usage, rec->caller_file, rec->caller_line));
+	// DEAN, it may cause crash in some cases.
+    //PJ_LOG(5,(rec->obj_name, "Thread stack max usage=%u by %s:%d", 
+	//      rec->stk_max_usage, rec->caller_file, rec->caller_line));
 #endif
 
     return (DWORD)result;
@@ -486,6 +554,7 @@ PJ_DEF(pj_status_t) pj_thread_create( pj_pool_t *pool,
     /* Create the thread. */
     rec->proc = proc;
     rec->arg = arg;
+	rec->inst_id = pool->factory->inst_id;
     rec->hthread = CreateThread(NULL, stack_size, 
 				thread_main, rec,
 				dwflags, &rec->idthread);
@@ -529,9 +598,9 @@ PJ_DEF(pj_status_t) pj_thread_resume(pj_thread_t *p)
 /*
  * pj_thread_this()
  */
-PJ_DEF(pj_thread_t*) pj_thread_this(void)
+PJ_DEF(pj_thread_t*) pj_thread_this(int inst_id)
 {
-    pj_thread_t *rec = pj_thread_local_get(thread_tls_id);
+    pj_thread_t *rec = pj_thread_local_get(thread_tls_id[inst_id]);
 
     if (rec == NULL) {
 	pj_assert(!"Calling pjlib from unknown/external thread. You must "
@@ -559,7 +628,10 @@ PJ_DEF(pj_status_t) pj_thread_join(pj_thread_t *p)
     PJ_CHECK_STACK();
     PJ_ASSERT_RETURN(p, PJ_EINVAL);
 
-    PJ_LOG(6, (pj_thread_this()->obj_name, "Joining thread %s", p->obj_name));
+    if (p == pj_thread_this(rec->inst_id))
+	return PJ_ECANCELLED;
+
+    PJ_LOG(6, (pj_thread_this(rec->inst_id)->obj_name, "Joining thread %s", p->obj_name));
 
     rc = WaitForSingleObject(rec->hthread, INFINITE);
 
@@ -829,10 +901,12 @@ PJ_DEF(void*) pj_thread_local_get(long index)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name)
+static pj_status_t init_mutex(int inst_id, pj_mutex_t *mutex, const char *name)
 {
 
     PJ_CHECK_STACK();
+
+	mutex->inst_id = inst_id;
 
 #if PJ_WIN32_WINNT >= 0x0400
     InitializeCriticalSection(&mutex->crit);
@@ -860,7 +934,6 @@ static pj_status_t init_mutex(pj_mutex_t *mutex, const char *name)
 	mutex->obj_name[PJ_MAX_OBJ_NAME-1] = '\0';
     }
 
-    PJ_LOG(6, (mutex->obj_name, "Mutex created"));
     return PJ_SUCCESS;
 }
 
@@ -882,7 +955,7 @@ PJ_DEF(pj_status_t) pj_mutex_create(pj_pool_t *pool,
     if (!mutex)
         return PJ_ENOMEM;
 
-    rc = init_mutex(mutex, name);
+    rc = init_mutex(pool->factory->inst_id, mutex, name);
     if (rc != PJ_SUCCESS)
         return rc;
 
@@ -895,7 +968,7 @@ PJ_DEF(pj_status_t) pj_mutex_create(pj_pool_t *pool,
  * pj_mutex_create_simple()
  */
 PJ_DEF(pj_status_t) pj_mutex_create_simple( pj_pool_t *pool, 
-                                            const char *name,
+                        const char *name,
 					    pj_mutex_t **mutex )
 {
     return pj_mutex_create(pool, name, PJ_MUTEX_SIMPLE, mutex);
@@ -922,7 +995,7 @@ PJ_DEF(pj_status_t) pj_mutex_lock(pj_mutex_t *mutex)
     PJ_ASSERT_RETURN(mutex, PJ_EINVAL);
 
     LOG_MUTEX((mutex->obj_name, "Mutex: thread %s is waiting", 
-				pj_thread_this()->obj_name));
+				pj_thread_this(mutex->inst_id)->obj_name));
 
 #if PJ_WIN32_WINNT >= 0x0400
     EnterCriticalSection(&mutex->crit);
@@ -936,11 +1009,11 @@ PJ_DEF(pj_status_t) pj_mutex_lock(pj_mutex_t *mutex)
 #endif
     LOG_MUTEX((mutex->obj_name, 
 	      (status==PJ_SUCCESS ? "Mutex acquired by thread %s" : "FAILED by %s"),
-	      pj_thread_this()->obj_name));
+	      pj_thread_this(mutex->inst_id)->obj_name));
 
 #if PJ_DEBUG
     if (status == PJ_SUCCESS) {
-	mutex->owner = pj_thread_this();
+	mutex->owner = pj_thread_this(mutex->inst_id);
 	++mutex->nesting_level;
     }
 #endif
@@ -959,14 +1032,14 @@ PJ_DEF(pj_status_t) pj_mutex_unlock(pj_mutex_t *mutex)
     PJ_ASSERT_RETURN(mutex, PJ_EINVAL);
 
 #if PJ_DEBUG
-    pj_assert(mutex->owner == pj_thread_this());
+    pj_assert(mutex->owner == pj_thread_this(mutex->inst_id));
     if (--mutex->nesting_level == 0) {
 	mutex->owner = NULL;
     }
 #endif
 
     LOG_MUTEX((mutex->obj_name, "Mutex released by thread %s", 
-				pj_thread_this()->obj_name));
+				pj_thread_this(mutex->inst_id)->obj_name));
 
 #if PJ_WIN32_WINNT >= 0x0400
     LeaveCriticalSection(&mutex->crit);
@@ -989,7 +1062,7 @@ PJ_DEF(pj_status_t) pj_mutex_trylock(pj_mutex_t *mutex)
     PJ_ASSERT_RETURN(mutex, PJ_EINVAL);
 
     LOG_MUTEX((mutex->obj_name, "Mutex: thread %s is trying", 
-				pj_thread_this()->obj_name));
+				pj_thread_this(mutex->inst_id)->obj_name));
 
 #if PJ_WIN32_WINNT >= 0x0400
     status=TryEnterCriticalSection(&mutex->crit) ? PJ_SUCCESS : PJ_EUNKNOWN;
@@ -999,15 +1072,15 @@ PJ_DEF(pj_status_t) pj_mutex_trylock(pj_mutex_t *mutex)
 #endif
     if (status==PJ_SUCCESS) {
 	LOG_MUTEX((mutex->obj_name, "Mutex acquired by thread %s", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(mutex->inst_id)->obj_name));
 
 #if PJ_DEBUG
-	mutex->owner = pj_thread_this();
+	mutex->owner = pj_thread_this(mutex->inst_id);
 	++mutex->nesting_level;
 #endif
     } else {
 	LOG_MUTEX((mutex->obj_name, "Mutex: thread %s's trylock() failed", 
-				    pj_thread_this()->obj_name));
+				    pj_thread_this(mutex->inst_id)->obj_name));
     }
 
     return status;
@@ -1038,12 +1111,18 @@ PJ_DEF(pj_status_t) pj_mutex_destroy(pj_mutex_t *mutex)
 PJ_DEF(pj_bool_t) pj_mutex_is_locked(pj_mutex_t *mutex)
 {
 #if PJ_DEBUG
-    return mutex->owner == pj_thread_this();
+    return mutex->owner == pj_thread_this(mutex->inst_id);
 #else
     PJ_UNUSED_ARG(mutex);
     pj_assert(!"PJ_DEBUG is not set!");
     return 1;
 #endif
+}
+
+PJ_DEF(int) pj_get_mutex_inst_id(pj_mutex_t *mutex)
+{
+	PJ_ASSERT_RETURN(mutex, -1);
+	return mutex->inst_id;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1056,18 +1135,18 @@ PJ_DEF(pj_bool_t) pj_mutex_is_locked(pj_mutex_t *mutex)
 /*
  * pj_enter_critical_section()
  */
-PJ_DEF(void) pj_enter_critical_section(void)
+PJ_DEF(void) pj_enter_critical_section(int inst_id)
 {
-    pj_mutex_lock(&critical_section_mutex);
+    pj_mutex_lock(&critical_section_mutex[inst_id]);
 }
 
 
 /*
  * pj_leave_critical_section()
  */
-PJ_DEF(void) pj_leave_critical_section(void)
+PJ_DEF(void) pj_leave_critical_section(int inst_id)
 {
-    pj_mutex_unlock(&critical_section_mutex);
+    pj_mutex_unlock(&critical_section_mutex[inst_id]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1091,6 +1170,8 @@ PJ_DEF(pj_status_t) pj_sem_create( pj_pool_t *pool,
     sem->hSemaphore = CreateSemaphore(NULL, initial, max, NULL);
     if (!sem->hSemaphore)
 	return PJ_RETURN_OS_ERROR(GetLastError());
+
+	sem->inst_id = pool->factory->inst_id;
 
     /* Set name. */
     if (!name) {
@@ -1117,15 +1198,15 @@ static pj_status_t pj_sem_wait_for(pj_sem_t *sem, unsigned timeout)
     PJ_ASSERT_RETURN(sem, PJ_EINVAL);
 
     LOG_MUTEX((sem->obj_name, "Semaphore: thread %s is waiting", 
-			      pj_thread_this()->obj_name));
+			      pj_thread_this(sem->inst_id)->obj_name));
 
     result = WaitForSingleObject(sem->hSemaphore, timeout);
     if (result == WAIT_OBJECT_0) {
 	LOG_MUTEX((sem->obj_name, "Semaphore acquired by thread %s", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(sem->inst_id)->obj_name));
     } else {
 	LOG_MUTEX((sem->obj_name, "Semaphore: thread %s FAILED to acquire", 
-				  pj_thread_this()->obj_name));
+				  pj_thread_this(sem->inst_id)->obj_name));
     }
 
     if (result==WAIT_OBJECT_0)
@@ -1159,6 +1240,17 @@ PJ_DEF(pj_status_t) pj_sem_trywait(pj_sem_t *sem)
 }
 
 /*
+ * pj_sem_trywait2()
+ */
+PJ_DEF(pj_status_t) pj_sem_trywait2(pj_sem_t *sem)
+{
+    PJ_CHECK_STACK();
+    PJ_ASSERT_RETURN(sem, PJ_EINVAL);
+
+    return pj_sem_wait_for(sem, 10); // 10 milliseconds.
+}
+
+/*
  * pj_sem_post()
  */
 PJ_DEF(pj_status_t) pj_sem_post(pj_sem_t *sem)
@@ -1167,7 +1259,7 @@ PJ_DEF(pj_status_t) pj_sem_post(pj_sem_t *sem)
     PJ_ASSERT_RETURN(sem, PJ_EINVAL);
 
     LOG_MUTEX((sem->obj_name, "Semaphore released by thread %s",
-			      pj_thread_this()->obj_name));
+			      pj_thread_this(sem->inst_id)->obj_name));
 
     if (ReleaseSemaphore(sem->hSemaphore, 1, NULL))
         return PJ_SUCCESS;
@@ -1184,7 +1276,7 @@ PJ_DEF(pj_status_t) pj_sem_destroy(pj_sem_t *sem)
     PJ_ASSERT_RETURN(sem, PJ_EINVAL);
 
     LOG_MUTEX((sem->obj_name, "Semaphore destroyed by thread %s",
-			      pj_thread_this()->obj_name));
+			      pj_thread_this(sem->inst_id)->obj_name));
 
     if (CloseHandle(sem->hSemaphore))
         return PJ_SUCCESS;
@@ -1221,6 +1313,7 @@ PJ_DEF(pj_status_t) pj_event_create( pj_pool_t *pool,
 
     if (!event->hEvent)
 	return PJ_RETURN_OS_ERROR(GetLastError());
+	event->inst_id = pool->factory->inst_id;
 
     /* Set name. */
     if (!name) {
@@ -1247,15 +1340,15 @@ static pj_status_t pj_event_wait_for(pj_event_t *event, unsigned timeout)
     PJ_ASSERT_RETURN(event, PJ_EINVAL);
 
     PJ_LOG(6, (event->obj_name, "Event: thread %s is waiting", 
-			        pj_thread_this()->obj_name));
+			        pj_thread_this(event->inst_id)->obj_name));
 
     result = WaitForSingleObject(event->hEvent, timeout);
     if (result == WAIT_OBJECT_0) {
 	PJ_LOG(6, (event->obj_name, "Event: thread %s is released", 
-				    pj_thread_this()->obj_name));
+				    pj_thread_this(event->inst_id)->obj_name));
     } else {
 	PJ_LOG(6, (event->obj_name, "Event: thread %s FAILED to acquire", 
-				    pj_thread_this()->obj_name));
+				    pj_thread_this(event->inst_id)->obj_name));
     }
 
     if (result==WAIT_OBJECT_0)
@@ -1307,7 +1400,7 @@ PJ_DEF(pj_status_t) pj_event_set(pj_event_t *event)
  */
 PJ_DEF(pj_status_t) pj_event_pulse(pj_event_t *event)
 {
-    PJ_CHECK_STACK();
+    /*PJ_CHECK_STACK();
     PJ_ASSERT_RETURN(event, PJ_EINVAL);
 
     PJ_LOG(6, (event->obj_name, "Pulsing event"));
@@ -1315,7 +1408,7 @@ PJ_DEF(pj_status_t) pj_event_pulse(pj_event_t *event)
     if (PulseEvent(event->hEvent))
         return PJ_SUCCESS;
     else
-        return PJ_RETURN_OS_ERROR(GetLastError());
+        return PJ_RETURN_OS_ERROR(GetLastError());*/
 }
 
 /*

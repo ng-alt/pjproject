@@ -17,3 +17,6 @@ gsm:		gsm-1.0.12
 ilbc:		from RFC
 resample:	lib-resample, I think version 1.7
 srtp		libsrtp-1.4.4
+bzip		libzip2-1.0.6
+umem		libumem-1.0.1
+usrsctp		libusrsctp-0.9.1 greater

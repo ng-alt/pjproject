@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: simple_pjsua.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -48,7 +48,7 @@
 
 
 /* Callback called by the library upon receiving incoming call */
-static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
+static void on_incoming_call(int inst_id, pjsua_acc_id acc_id, pjsua_call_id call_id,
 			     pjsip_rx_data *rdata)
 {
     pjsua_call_info ci;
@@ -56,40 +56,40 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
     PJ_UNUSED_ARG(acc_id);
     PJ_UNUSED_ARG(rdata);
 
-    pjsua_call_get_info(call_id, &ci);
+    pjsua_call_get_info(inst_id, call_id, &ci);
 
     PJ_LOG(3,(THIS_FILE, "Incoming call from %.*s!!",
 			 (int)ci.remote_info.slen,
 			 ci.remote_info.ptr));
 
     /* Automatically answer incoming calls with 200/OK */
-    pjsua_call_answer(call_id, 200, NULL, NULL);
+    pjsua_call_answer(inst_id, call_id, 200, NULL, NULL);
 }
 
 /* Callback called by the library when call's state has changed */
-static void on_call_state(pjsua_call_id call_id, pjsip_event *e)
+static void on_call_state(int inst_id, pjsua_call_id call_id, pjsip_event *e)
 {
     pjsua_call_info ci;
 
     PJ_UNUSED_ARG(e);
 
-    pjsua_call_get_info(call_id, &ci);
+    pjsua_call_get_info(inst_id, call_id, &ci);
     PJ_LOG(3,(THIS_FILE, "Call %d state=%.*s", call_id,
 			 (int)ci.state_text.slen,
 			 ci.state_text.ptr));
 }
 
 /* Callback called by the library when call's media state has changed */
-static void on_call_media_state(pjsua_call_id call_id)
+static void on_call_media_state(int inst_id, pjsua_call_id call_id)
 {
     pjsua_call_info ci;
 
-    pjsua_call_get_info(call_id, &ci);
+    pjsua_call_get_info(inst_id, call_id, &ci);
 
     if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
 	// When media is active, connect call to sound device.
-	pjsua_conf_connect(ci.conf_slot, 0);
-	pjsua_conf_connect(0, ci.conf_slot);
+	pjsua_conf_connect(inst_id, ci.conf_slot, 0);
+	pjsua_conf_connect(inst_id, 0, ci.conf_slot);
     }
 }
 
@@ -97,7 +97,7 @@ static void on_call_media_state(pjsua_call_id call_id)
 static void error_exit(const char *title, pj_status_t status)
 {
     pjsua_perror(THIS_FILE, title, status);
-    pjsua_destroy();
+    pjsua_destroy(0);
     exit(1);
 }
 
@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
 
     /* If argument is specified, it's got to be a valid SIP URL */
     if (argc > 1) {
-	status = pjsua_verify_url(argv[1]);
+	status = pjsua_verify_url(0, argv[1]);
 	if (status != PJ_SUCCESS) error_exit("Invalid URL in argv", status);
     }
 
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
 	pjsua_logging_config_default(&log_cfg);
 	log_cfg.console_level = 4;
 
-	status = pjsua_init(&cfg, &log_cfg, NULL);
+	status = pjsua_init(0, &cfg, &log_cfg, NULL);
 	if (status != PJ_SUCCESS) error_exit("Error in pjsua_init()", status);
     }
 
@@ -144,19 +144,19 @@ int main(int argc, char *argv[])
 
 	pjsua_transport_config_default(&cfg);
 	cfg.port = 5060;
-	status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
+	status = pjsua_transport_create(0, PJSIP_TRANSPORT_UDP, &cfg, NULL);
 	if (status != PJ_SUCCESS) error_exit("Error creating transport", status);
     }
 
     /* Initialization is done, now start pjsua */
-    status = pjsua_start();
+    status = pjsua_start(0);
     if (status != PJ_SUCCESS) error_exit("Error starting pjsua", status);
 
     /* Register to SIP server by creating SIP account. */
     {
 	pjsua_acc_config cfg;
 
-	pjsua_acc_config_default(&cfg);
+	pjsua_acc_config_default(0, &cfg);
 	cfg.id = pj_str("sip:" SIP_USER "@" SIP_DOMAIN);
 	cfg.reg_uri = pj_str("sip:" SIP_DOMAIN);
 	cfg.cred_count = 1;
@@ -166,14 +166,14 @@ int main(int argc, char *argv[])
 	cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
 	cfg.cred_info[0].data = pj_str(SIP_PASSWD);
 
-	status = pjsua_acc_add(&cfg, PJ_TRUE, &acc_id);
+	status = pjsua_acc_add(0, &cfg, PJ_TRUE, &acc_id);
 	if (status != PJ_SUCCESS) error_exit("Error adding account", status);
     }
 
     /* If URL is specified, make call to the URL. */
     if (argc > 1) {
 	pj_str_t uri = pj_str(argv[1]);
-	status = pjsua_call_make_call(acc_id, &uri, 0, NULL, NULL, NULL);
+	status = pjsua_call_make_call(0, acc_id, &uri, 0, 0, NULL, NULL, NULL);
 	if (status != PJ_SUCCESS) error_exit("Error making call", status);
     }
 
@@ -191,11 +191,11 @@ int main(int argc, char *argv[])
 	    break;
 
 	if (option[0] == 'h')
-	    pjsua_call_hangup_all();
+	    pjsua_call_hangup_all(0);
     }
 
     /* Destroy pjsua */
-    pjsua_destroy();
+    pjsua_destroy(0);
 
     return 0;
 }

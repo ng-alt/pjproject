@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: aectest.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -157,17 +157,19 @@ int main(int argc, char *argv[])
     }
 
     /* Must init PJLIB first: */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &cp, &pj_pool_factory_default_policy, 0);
 
     /* 
      * Initialize media endpoint.
      * This will implicitly initialize PJMEDIA too.
      */
-    status = pjmedia_endpt_create(&cp.factory, NULL, 1, &med_endpt);
+    //status = pjmedia_endpt_create(&cp.factory, NULL, 1, &med_endpt);
+	// charles modified
+    status = pjmedia_endpt_create(0, &cp.factory, NULL, 1, 0, &med_endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
     /* Create memory pool for our file player */
@@ -290,7 +292,7 @@ int main(int argc, char *argv[])
     pj_caching_pool_destroy( &cp );
 
     /* Shutdown PJLIB */
-    pj_shutdown();
+    pj_shutdown(0);
 
     if (interactive) {
 	char s[10], *dummy;

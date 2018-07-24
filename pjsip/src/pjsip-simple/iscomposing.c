@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: iscomposing.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -159,7 +159,8 @@ PJ_DEF(pjsip_msg_body*) pjsip_iscomposing_create_body( pj_pool_t *pool,
 }
 
 
-PJ_DEF(pj_status_t) pjsip_iscomposing_parse( pj_pool_t *pool,
+PJ_DEF(pj_status_t) pjsip_iscomposing_parse( int inst_id, 
+						 pj_pool_t *pool,
 					     char *msg,
 					     pj_size_t len,
 					     pj_bool_t *p_is_composing,
@@ -175,7 +176,7 @@ PJ_DEF(pj_status_t) pjsip_iscomposing_parse( pj_pool_t *pool,
     if (p_content_type) *p_content_type = NULL;
 
     /* Parse XML */
-    doc = pj_xml_parse( pool, msg, len);
+    doc = pj_xml_parse( inst_id, pool, msg, len);
     if (!doc)
 	return PJLIB_UTIL_EINXML;
 

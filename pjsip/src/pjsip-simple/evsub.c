@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: evsub.c 4064 2012-04-20 09:59:51Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -83,7 +83,7 @@ PJ_DEF(const pjsip_method*) pjsip_get_notify_method()
  * Static prototypes.
  */
 static void	   mod_evsub_on_tsx_state(pjsip_transaction*, pjsip_event*);
-static pj_status_t mod_evsub_unload(void);
+static pj_status_t mod_evsub_unload(pjsip_endpoint *endpt);
 
 
 /*
@@ -262,8 +262,9 @@ static const pj_str_t STR_TIMEOUT    = { "timeout", 7};
 /*
  * On unload module.
  */
-static pj_status_t mod_evsub_unload(void)
+static pj_status_t mod_evsub_unload(pjsip_endpoint *endpt)
 {
+	PJ_UNUSED_ARG(endpt);
     pjsip_endpt_release_pool(mod_evsub.endpt, mod_evsub.pool);
     mod_evsub.pool = NULL;
 
@@ -286,6 +287,8 @@ PJ_DEF(pj_status_t) pjsip_evsub_init_module(pjsip_endpoint *endpt)
 	{ "SUBSCRIBE", 9},
 	{ "NOTIFY", 6}
     };
+
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
 
     status = pj_register_strerror(PJSIP_SIMPLE_ERRNO_START,
 				  PJ_ERRNO_SPACE_SIZE,
@@ -315,7 +318,7 @@ PJ_DEF(pj_status_t) pjsip_evsub_init_module(pjsip_endpoint *endpt)
     mod_evsub.allow_events_hdr = pjsip_allow_events_hdr_create(mod_evsub.pool);
 
     /* Register SIP-event specific headers parser: */
-    pjsip_evsub_init_parser();
+    pjsip_evsub_init_parser(inst_id);
 
     /* Register new methods SUBSCRIBE and NOTIFY in Allow-ed header */
     pjsip_endpt_add_capability(endpt, &mod_evsub.mod, PJSIP_H_ALLOW, NULL,
@@ -372,6 +375,15 @@ PJ_DEF(void*) pjsip_evsub_get_mod_data( pjsip_evsub *sub, unsigned mod_id )
 {
     PJ_ASSERT_RETURN(mod_id < PJSIP_MAX_MODULE, NULL);
     return sub->mod_data[mod_id];
+}
+
+
+/*
+ * Get event subscription's module data.
+ */
+PJ_DEF(void*) pjsip_evsub_get_endpt( pjsip_evsub *sub )
+{
+    return sub->endpt;
 }
 
 
@@ -1320,11 +1332,12 @@ static void terminate_timer_cb(pj_timer_heap_t *timer_heap,
 {
     pj_str_t *key;
     pjsip_transaction *tsx;
+	int inst_id = entry->id;
 
     PJ_UNUSED_ARG(timer_heap);
 
     key = (pj_str_t*)entry->user_data;
-    tsx = pjsip_tsx_layer_find_tsx(key, PJ_FALSE);
+    tsx = pjsip_tsx_layer_find_tsx(inst_id, key, PJ_FALSE);
     /* Chance of race condition here */
     if (tsx) {
 	pjsip_tsx_terminate(tsx, PJSIP_SC_REQUEST_UPDATED);
@@ -1510,7 +1523,7 @@ static pjsip_evsub *on_new_transaction( pjsip_transaction *tsx,
 	    sub->pending_sub->state < PJSIP_TSX_STATE_COMPLETED) 
 	{
 	    pj_timer_entry *timer;
-	    pj_str_t *key;
+		pj_str_t *key;
 	    pj_time_val timeout = {0, 0};
 
 	    PJ_LOG(4,(sub->obj_name, 
@@ -1534,6 +1547,7 @@ static pjsip_evsub *on_new_transaction( pjsip_transaction *tsx,
 	    pj_strdup(dlg->pool, key, &sub->pending_sub->transaction_key);
 	    timer->cb = &terminate_timer_cb;
 	    timer->user_data = key;
+		timer->id = tsx->pool->factory->inst_id;
 
 	    pjsip_endpt_schedule_timer(dlg->endpt, timer, &timeout);
 	}
@@ -1804,7 +1818,6 @@ static void on_tsx_state_uac( pjsip_evsub *sub, pjsip_transaction *tsx,
 
 	pjsip_tx_data *tdata;
 	pj_status_t status;
-	int next_refresh;
 
 	/* Only want to handle initial NOTIFY receive event. */
 	if (tsx->state != PJSIP_TSX_STATE_TRYING)
@@ -1884,18 +1897,13 @@ static void on_tsx_state_uac( pjsip_evsub *sub, pjsip_transaction *tsx,
 	    (pj_stricmp(&sub_state->sub_state, &STR_ACTIVE)==0 ||
 	     pj_stricmp(&sub_state->sub_state, &STR_PENDING)==0))
 	{
-	    next_refresh = sub_state->expires_param;
+	    int next_refresh = sub_state->expires_param;
+	    unsigned timeout;
 
-	} else {
-	    next_refresh = sub->expires->ivalue;
-	}
-
-	/* Update time */
 	update_expires(sub, next_refresh);
 
 	/* Start UAC refresh timer, only when we're not unsubscribing */
-	if (sub->expires->ivalue != 0) {
-	    unsigned timeout = (next_refresh > TIME_UAC_REFRESH) ?
+	    timeout = (next_refresh > TIME_UAC_REFRESH) ?
 		next_refresh - TIME_UAC_REFRESH : next_refresh;
 
 	    PJ_LOG(5,(sub->obj_name, "Will refresh in %d seconds", timeout));

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_transaction.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -155,29 +155,33 @@ PJ_DECL(pj_status_t) pjsip_tsx_layer_init_module(pjsip_endpoint *endpt);
 /**
  * Get the instance of the transaction layer module.
  *
+ * @param inst_id   The instance id of pjsua.
  * @return	    The transaction layer module.
  */
-PJ_DECL(pjsip_module*) pjsip_tsx_layer_instance(void);
+PJ_DECL(pjsip_module*) pjsip_tsx_layer_instance(int inst_id);
 
 /**
  * Unregister and destroy transaction layer module.
  *
+ * @param inst_id   The instance id of pjsua.
  * @return	    PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pjsip_tsx_layer_destroy(void);
+PJ_DECL(pj_status_t) pjsip_tsx_layer_destroy(int inst_id);
 
 /**
  * Retrieve the current number of transactions currently registered
  * in the hash table.
  *
+ * @param inst_id   The instance id of pjsua.
  * @return	    Number of transactions.
  */
-PJ_DECL(unsigned) pjsip_tsx_layer_get_tsx_count(void);
+PJ_DECL(unsigned) pjsip_tsx_layer_get_tsx_count(int inst_id);
 
 /**
  * Find a transaction with the specified key. The transaction key normally
  * is created by calling #pjsip_tsx_create_key() from an incoming message.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param key	    The key string to find the transaction.
  * @param lock	    If non-zero, transaction will be locked before the
  *		    function returns, to make sure that it's not deleted
@@ -186,7 +190,8 @@ PJ_DECL(unsigned) pjsip_tsx_layer_get_tsx_count(void);
  * @return	    The matching transaction instance, or NULL if transaction
  *		    can not be found.
  */
-PJ_DECL(pjsip_transaction*) pjsip_tsx_layer_find_tsx( const pj_str_t *key,
+PJ_DECL(pjsip_transaction*) pjsip_tsx_layer_find_tsx( int inst_id,
+							  const pj_str_t *key,
 						      pj_bool_t lock );
 
 /**
@@ -199,7 +204,8 @@ PJ_DECL(pjsip_transaction*) pjsip_tsx_layer_find_tsx( const pj_str_t *key,
  * the \c branch parameter will be used as is as the transaction key. If
  * it exists but branch parameter doesn't exist, a unique branch parameter
  * will be created.
- *
+ * 
+ * @param inst_id   The instance id of pjsua.
  * @param tsx_user  Module to be registered as transaction user of the new
  *		    transaction, which will receive notification from the
  *		    transaction via on_tsx_state() callback.
@@ -208,7 +214,8 @@ PJ_DECL(pjsip_transaction*) pjsip_tsx_layer_find_tsx( const pj_str_t *key,
  *
  * @return          PJ_SUCCESS if successfull.
  */
-PJ_DECL(pj_status_t) pjsip_tsx_create_uac( pjsip_module *tsx_user,
+PJ_DECL(pj_status_t) pjsip_tsx_create_uac( int inst_id,
+					   pjsip_module *tsx_user,
 					   pjsip_tx_data *tdata,
 					   pjsip_transaction **p_tsx);
 
@@ -393,7 +400,7 @@ PJ_DECL(pjsip_transaction*) pjsip_rdata_get_tsx( pjsip_rx_data *rdata );
 /*
  * Dump transaction layer.
  */
-PJ_DECL(void) pjsip_tsx_layer_dump(pj_bool_t detail);
+PJ_DECL(void) pjsip_tsx_layer_dump(int inst_id, pj_bool_t detail);
 
 /**
  * Get the string name for the state.

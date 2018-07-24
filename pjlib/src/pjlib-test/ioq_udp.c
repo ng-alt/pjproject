@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ioq_udp.c 4387 2013-02-27 10:16:08Z ming $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -267,7 +267,7 @@ static int compliance_test(pj_bool_t allow_concur)
 
 	TRACE_("poll...");
 #ifdef PJ_SYMBIAN
-	rc = pj_symbianos_poll(-1, 5000);
+	rc = pj_symbianos_poll(-1, PJ_TIME_VAL_MSEC(timeout));
 #else
 	rc = pj_ioqueue_poll(ioque, &timeout);
 #endif
@@ -783,7 +783,7 @@ static int bench_test(pj_bool_t allow_concur, int bufsize,
 	do {
 	    pj_time_val timeout = { 1, 0 };
 #ifdef PJ_SYMBIAN
-	    rc = pj_symbianos_poll(-1, 1000);
+	    rc = pj_symbianos_poll(-1, PJ_TIME_VAL_MSEC(timeout));
 #else
 	    rc = pj_ioqueue_poll(ioque, &timeout);
 #endif
@@ -812,6 +812,7 @@ static int bench_test(pj_bool_t allow_concur, int bufsize,
 	do {
 	    pj_time_val timeout = { 0, 10 };
 #ifdef PJ_SYMBIAN
+	    PJ_UNUSED_ARG(timeout);
 	    rc = pj_symbianos_poll(-1, 100);
 #else	    
 	    rc = pj_ioqueue_poll(ioque, &timeout);
@@ -947,5 +948,4 @@ int udp_ioqueue_test()
  */
 int dummy_uiq_udp;
 #endif	/* INCLUDE_UDP_IOQUEUE_TEST */
-
 

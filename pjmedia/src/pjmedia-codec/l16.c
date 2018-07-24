@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: l16.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -148,7 +148,6 @@ PJ_DEF(pj_status_t) pjmedia_codec_l16_init(pjmedia_endpt *endpt,
 {
     pjmedia_codec_mgr *codec_mgr;
     pj_status_t status;
-
 
     PJ_UNUSED_ARG(options);
 

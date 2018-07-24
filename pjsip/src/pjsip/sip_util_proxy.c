@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_util_proxy.c 4385 2013-02-27 10:11:59Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -82,12 +82,15 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request_fwd(pjsip_endpoint *endpt,
     pj_status_t status;
     PJ_USE_EXCEPTION;
 
+	int inst_id;
 
     PJ_ASSERT_RETURN(endpt && rdata && p_tdata, PJ_EINVAL);
     PJ_ASSERT_RETURN(rdata->msg_info.msg->type == PJSIP_REQUEST_MSG, 
 		     PJSIP_ENOTREQUESTMSG);
 
     PJ_UNUSED_ARG(options);
+
+	inst_id = pjsip_endpt_get_inst_id(endpt);
 
 
     /* Request forwarding rule in RFC 3261 section 16.6:
@@ -118,7 +121,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request_fwd(pjsip_endpoint *endpt,
     pjsip_tx_data_add_ref(tdata);
 
     /* Duplicate the request */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	pjsip_msg *dst;
 	const pjsip_msg *src = rdata->msg_info.msg;
 	const pjsip_hdr *hsrc;
@@ -233,7 +236,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request_fwd(pjsip_endpoint *endpt,
 	status = PJ_ENOMEM;
 	goto on_error;
     }
-    PJ_END
+    PJ_END(inst_id)
 
 
     /* Done */
@@ -255,6 +258,8 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_response_fwd( pjsip_endpoint *endpt,
     pj_status_t status;
     PJ_USE_EXCEPTION;
 
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
+
     PJ_UNUSED_ARG(options);
 
     status = pjsip_endpt_create_tdata(endpt, &tdata);
@@ -263,7 +268,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_response_fwd( pjsip_endpoint *endpt,
 
     pjsip_tx_data_add_ref(tdata);
 
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	pjsip_msg *dst;
 	const pjsip_msg *src = rdata->msg_info.msg;
 	const pjsip_hdr *hsrc;
@@ -313,7 +318,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_response_fwd( pjsip_endpoint *endpt,
 	status = PJ_ENOMEM;
 	goto on_error;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     *p_tdata = tdata;
     return PJ_SUCCESS;
@@ -345,7 +350,7 @@ PJ_DEF(pj_str_t) pjsip_calculate_branch_id( pjsip_rx_data *rdata )
     /* If incoming request does not have RFC 3261 branch value, create
      * a branch value from GUID .
      */
-    if (pj_strncmp(&rdata->msg_info.via->branch_param, 
+    if (pj_strnicmp(&rdata->msg_info.via->branch_param, 
 		   &rfc3261_branch, PJSIP_RFC3261_BRANCH_LEN) != 0 ) 
     {
 	pj_str_t tmp;
@@ -359,7 +364,7 @@ PJ_DEF(pj_str_t) pjsip_calculate_branch_id( pjsip_rx_data *rdata )
 	tmp.ptr = branch.ptr + PJSIP_RFC3261_BRANCH_LEN + 2;
 	*(tmp.ptr-2) = (pj_int8_t)(branch.slen+73); 
 	*(tmp.ptr-1) = (pj_int8_t)(branch.slen+99);
-	pj_generate_unique_string( &tmp );
+	pj_generate_unique_string( rdata->tp_info.pool->factory->inst_id, &tmp );
 
 	branch.slen = PJSIP_MAX_BRANCH_LEN;
 	return branch;

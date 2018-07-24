@@ -108,14 +108,17 @@ if test "${CXX}" = ""; then
 fi
 
 # Other settings to feed to configure script. 
-#ARCH="-arch armv6"
-export CFLAGS="${CFLAGS} -DPJ_SDK_NAME=\"\\\"`basename $SDKPATH`\\\"\" ${ARCH} -isysroot ${SDKPATH}"
-export LDFLAGS="${LDFLAGS} ${ARCH} -isysroot ${SDKPATH} -framework AudioToolbox -framework Foundation"
-export AR="${DEVPATH}/usr/bin/libtool -static -o"
+DEVELOPER=`xcode-select -print-path`
+export CFLAGS="${CFLAGS} -DPJ_SDK_NAME=\"\\\"`basename $SDKPATH`\\\"\" ${ARCH} -isysroot ${SDKPATH} -miphoneos-version-min=7.0"
+#export LDFLAGS="${LDFLAGS} ${ARCH} -isysroot ${SDKPATH} -framework AudioToolbox -framework Foundation"
+export LDFLAGS="${LDFLAGS} ${ARCH} -isysroot ${SDKPATH} -framework AudioToolbox -framework Foundation -miphoneos-version-min=7.0"
+#export LDFLAGS="${LDFLAGS} ${ARCH}  -miphoneos-version-min=7.0"
+#export AR="${DEVPATH}/usr/bin/libtool -static -o"
+export AR="${DEVELOPER}/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -o"
 export RANLIB="echo ranlib"
 # Use gcc -E as preprocessor instead of cpp, since cpp will find the
 # header files in standard /usr/include instead of in isysroot
-export CPP="${CC} ${ARCH} -E -isysroot ${SDKPATH}"
+export CPP="${CC} ${ARCH} -E -isysroot ${SDKPATH} -miphoneos-version-min=7.0"
 
 # Print settings
 if test "1" = "1"; then
@@ -130,7 +133,10 @@ if test "1" = "1"; then
 fi
 
 # And finally invoke the configure script itself
-./aconfigure --host=arm-apple-darwin9 --disable-floating-point $*
+#./aconfigure --host=arm-apple-darwin9 --disable-floating-point --disable-sound $*
+#./aconfigure --host=arm-apple-darwin9 --target=arm-apple-darwin9 --disable-floating-point --disable-sound $*
+echo ${CROSS_TYPE}
+./aconfigure --host=${CROSS_TYPE} --target=${CROSS_TYPE}
 
 if test "$?" = "0"; then
   echo "Done configuring for `basename $SDKPATH`"

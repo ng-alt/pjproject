@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: evsub_msg.c 3565 2011-05-15 12:13:24Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -293,12 +293,12 @@ static pjsip_hdr* parse_hdr_sub_state( pjsip_parse_ctx *ctx )
 /*
  * Register header parsers.
  */
-PJ_DEF(void) pjsip_evsub_init_parser(void)
+PJ_DEF(void) pjsip_evsub_init_parser(int inst_id)
 {
-    pjsip_register_hdr_parser( "Event", "o",
+    pjsip_register_hdr_parser( inst_id, "Event", "o",
 			       &parse_hdr_event);
 
-    pjsip_register_hdr_parser( "Subscription-State", NULL, 
+    pjsip_register_hdr_parser( inst_id, "Subscription-State", NULL, 
 			       &parse_hdr_sub_state);
 }
 

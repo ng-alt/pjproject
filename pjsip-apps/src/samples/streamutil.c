@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: streamutil.c 3816 2011-10-14 04:15:15Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -330,7 +330,7 @@ int main(int argc, char *argv[])
 
 
     /* init PJLIB : */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
 
@@ -442,13 +442,14 @@ int main(int argc, char *argv[])
 #endif
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &cp, &pj_pool_factory_default_policy, 0);
 
     /* 
      * Initialize media endpoint.
      * This will implicitly initialize PJMEDIA too.
      */
-    status = pjmedia_endpt_create(&cp.factory, NULL, 1, &med_endpt);
+    //status = pjmedia_endpt_create(&cp.factory, NULL, 1, &med_endpt);
+    status = pjmedia_endpt_create(0, &cp.factory, NULL, 1, 0, &med_endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, 1);
 
     /* Create memory pool for application purpose */
@@ -690,7 +691,7 @@ on_exit:
     pj_caching_pool_destroy( &cp );
 
     /* Shutdown PJLIB */
-    pj_shutdown();
+    pj_shutdown(0);
 
 
     return (status == PJ_SUCCESS) ? 0 : 1;

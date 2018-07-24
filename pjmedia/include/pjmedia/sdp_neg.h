@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sdp_neg.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -649,6 +649,7 @@ PJ_DECL(pj_status_t) pjmedia_sdp_neg_cancel_offer(pjmedia_sdp_neg *neg);
  * If the negotiation fails, the active local and remote SDP will not
  * change.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool		Pool to allocate memory. The pool's lifetime needs
  *			to be valid for the duration of the negotiator.
  * @param neg		The SDP negotiator instance.
@@ -658,8 +659,9 @@ PJ_DECL(pj_status_t) pjmedia_sdp_neg_cancel_offer(pjmedia_sdp_neg *neg);
  *			is actuve common in both offer and answer, or 
  *			failure code when negotiation has failed.
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_neg_negotiate( pj_pool_t *pool,
-					        pjmedia_sdp_neg *neg,
+PJ_DECL(pj_status_t) pjmedia_sdp_neg_negotiate( int inst_id, 
+						pj_pool_t *pool,
+					    pjmedia_sdp_neg *neg,
 						pj_bool_t allow_asym);
 
 

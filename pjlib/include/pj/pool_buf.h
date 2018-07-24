@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pool_buf.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -85,13 +85,15 @@ PJ_BEGIN_DECL
  * pool (such as mutexes) have been destroyed before the pool gets
  * invalidated.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param name	    Optional pool name.
  * @param buf	    Buffer to be used by the pool.
  * @param size	    The size of the buffer.
  *
  * @return	    The memory pool instance.
  */
-PJ_DECL(pj_pool_t*) pj_pool_create_on_buf(const char *name,
+PJ_DECL(pj_pool_t*) pj_pool_create_on_buf(int ins_id,
+					  const char *name,
 					  void *buf,
 					  pj_size_t size);
 

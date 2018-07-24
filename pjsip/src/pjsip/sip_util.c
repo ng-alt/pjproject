@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_util.c 3952 2012-02-16 05:35:25Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -158,7 +158,9 @@ PJ_DEF(pjsip_target*) pjsip_target_set_get_next(const pjsip_target_set *tset)
 PJ_DEF(pj_status_t) pjsip_target_set_set_current( pjsip_target_set *tset,
 						  pjsip_target *target)
 {
-    PJ_ASSERT_RETURN(tset && target, PJ_EINVAL);
+	PJ_ASSERT_RETURN(tset && target, PJ_EINVAL);
+	if (pj_list_find_node(tset, target) == NULL)
+		PJ_LOG(4, ("sip_util.c", "pjsip_target_set_set_current() pjsip_target_set not found."));
     PJ_ASSERT_RETURN(pj_list_find_node(tset, target) != NULL, PJ_ENOTFOUND);
 
     tset->current = target;
@@ -308,6 +310,8 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
     pj_str_t tmp;
     pj_status_t status;
     const pj_str_t STR_CONTACT = { "Contact", 7 };
+
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
     PJ_USE_EXCEPTION;
 
     status = pjsip_endpt_create_tdata(endpt, &tdata);
@@ -317,10 +321,10 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
     /* Init reference counter to 1. */
     pjsip_tx_data_add_ref(tdata);
 
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	/* Request target. */
 	pj_strdup_with_null(tdata->pool, &tmp, param_target);
-	target = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 0);
+	target = pjsip_parse_uri( inst_id, tdata->pool, tmp.ptr, tmp.slen, 0);
 	if (target == NULL) {
 	    status = PJSIP_EINVALIDREQURI;
 	    goto on_error;
@@ -329,7 +333,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	/* From */
 	from = pjsip_from_hdr_create(tdata->pool);
 	pj_strdup_with_null(tdata->pool, &tmp, param_from);
-	from->uri = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 
+	from->uri = pjsip_parse_uri( inst_id, tdata->pool, tmp.ptr, tmp.slen, 
 				     PJSIP_PARSE_URI_AS_NAMEADDR);
 	if (from->uri == NULL) {
 	    status = PJSIP_EINVALIDHDR;
@@ -340,7 +344,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	/* To */
 	to = pjsip_to_hdr_create(tdata->pool);
 	pj_strdup_with_null(tdata->pool, &tmp, param_to);
-	to->uri = pjsip_parse_uri( tdata->pool, tmp.ptr, tmp.slen, 
+	to->uri = pjsip_parse_uri( inst_id, tdata->pool, tmp.ptr, tmp.slen, 
 				   PJSIP_PARSE_URI_AS_NAMEADDR);
 	if (to->uri == NULL) {
 	    status = PJSIP_EINVALIDHDR;
@@ -351,7 +355,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	if (param_contact) {
 	    pj_strdup_with_null(tdata->pool, &tmp, param_contact);
 	    contact = (pjsip_contact_hdr*)
-		      pjsip_parse_hdr(tdata->pool, &STR_CONTACT, tmp.ptr, 
+		      pjsip_parse_hdr(inst_id, tdata->pool, &STR_CONTACT, tmp.ptr, 
 				      tmp.slen, NULL);
 	    if (contact == NULL) {
 		status = PJSIP_EINVALIDHDR;
@@ -386,7 +390,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request(  pjsip_endpoint *endpt,
 	status = PJ_ENOMEM;
 	goto on_error;
     }
-    PJ_END
+    PJ_END(inst_id)
 
     *p_tdata = tdata;
     return PJ_SUCCESS;
@@ -415,11 +419,15 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request_from_hdr( pjsip_endpoint *endpt,
     pjsip_cid_hdr *call_id;
     pjsip_cseq_hdr *cseq = NULL; /* The NULL because warning in VC6 */
     pj_status_t status;
-    PJ_USE_EXCEPTION;
+	PJ_USE_EXCEPTION;
+
+	int inst_id;
 
     /* Check arguments. */
     PJ_ASSERT_RETURN(endpt && method && param_target && param_from &&
 		     param_to && p_tdata, PJ_EINVAL);
+
+	inst_id = pjsip_endpt_get_inst_id(endpt);
 
     /* Create new transmit data. */
     status = pjsip_endpt_create_tdata(endpt, &tdata);
@@ -429,7 +437,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request_from_hdr( pjsip_endpoint *endpt,
     /* Set initial reference counter to 1. */
     pjsip_tx_data_add_ref(tdata);
 
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	/* Duplicate target URI and headers. */
 	target = (pjsip_uri*) pjsip_uri_clone(tdata->pool, param_target);
 	from = (pjsip_from_hdr*) pjsip_hdr_clone(tdata->pool, param_from);
@@ -463,7 +471,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_create_request_from_hdr( pjsip_endpoint *endpt,
 	status = PJ_ENOMEM;
 	goto on_error;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     *p_tdata = tdata;
     return PJ_SUCCESS;
@@ -1188,7 +1196,7 @@ static void stateless_send_transport_cb( void *token,
 		      PJSIP_RFC3261_BRANCH_LEN);
 	    tmp.ptr = via->branch_param.ptr + PJSIP_RFC3261_BRANCH_LEN + 2;
 	    *(tmp.ptr-2) = 80; *(tmp.ptr-1) = 106;
-	    pj_generate_unique_string(&tmp);
+	    pj_generate_unique_string(tdata->pool->factory->inst_id, &tmp);
 	}
 
 	via->transport = pj_str(stateless_data->cur_transport->type_name);
@@ -1226,7 +1234,8 @@ static void stateless_send_transport_cb( void *token,
 static void 
 stateless_send_resolver_callback( pj_status_t status,
 				  void *token,
-				  const struct pjsip_server_addresses *addr)
+				  const struct pjsip_server_addresses *addr,
+				  int target_port)
 {
     pjsip_send_state *stateless_data = (pjsip_send_state*) token;
     pjsip_tx_data *tdata = stateless_data->tdata;
@@ -1248,14 +1257,14 @@ stateless_send_resolver_callback( pj_status_t status,
     }
     pj_assert(tdata->dest_info.addr.count != 0);
 
-#if !defined(PJSIP_DONT_SWITCH_TO_TCP) || PJSIP_DONT_SWITCH_TO_TCP==0
     /* RFC 3261 section 18.1.1:
      * If a request is within 200 bytes of the path MTU, or if it is larger
      * than 1300 bytes and the path MTU is unknown, the request MUST be sent
      * using an RFC 2914 [43] congestion controlled transport protocol, such
      * as TCP.
      */
-    if (tdata->msg->type == PJSIP_REQUEST_MSG &&
+    if (pjsip_cfg()->endpt.disable_tcp_switch==0 &&
+	tdata->msg->type == PJSIP_REQUEST_MSG &&
 	tdata->dest_info.addr.count > 0 && 
 	tdata->dest_info.addr.entry[0].type == PJSIP_TRANSPORT_UDP)
     {
@@ -1278,10 +1287,16 @@ stateless_send_resolver_callback( pj_status_t status,
 	    int i;
 	    int count = tdata->dest_info.addr.count;
 
-	    PJ_LOG(5,(THIS_FILE, "%s exceeds UDP size threshold (%u), "
-				 "sending with TCP",
-				 pjsip_tx_data_get_info(tdata),
-				 PJSIP_UDP_SIZE_THRESHOLD));
+		if (target_port == 5061)
+			PJ_LOG(5,(THIS_FILE, "%s exceeds UDP size threshold (%u), "
+			"sending with TLS",
+			pjsip_tx_data_get_info(tdata),
+			PJSIP_UDP_SIZE_THRESHOLD));
+		else
+			PJ_LOG(5,(THIS_FILE, "%s exceeds UDP size threshold (%u), "
+				"sending with TCP",
+				pjsip_tx_data_get_info(tdata),
+				PJSIP_UDP_SIZE_THRESHOLD));
 
 	    /* Insert "TCP version" of resolved UDP addresses at the
 	     * beginning.
@@ -1289,15 +1304,17 @@ stateless_send_resolver_callback( pj_status_t status,
 	    if (count * 2 > PJSIP_MAX_RESOLVED_ADDRESSES)
 		count = PJSIP_MAX_RESOLVED_ADDRESSES / 2;
 	    for (i = 0; i < count; ++i) {
-		pj_memcpy(&tdata->dest_info.addr.entry[i+count],
-			  &tdata->dest_info.addr.entry[i],
-			  sizeof(tdata->dest_info.addr.entry[0]));
-		tdata->dest_info.addr.entry[i].type = PJSIP_TRANSPORT_TCP;
+			pj_memcpy(&tdata->dest_info.addr.entry[i+count],
+				  &tdata->dest_info.addr.entry[i],
+				  sizeof(tdata->dest_info.addr.entry[0]));
+			if (target_port == 5061)
+				tdata->dest_info.addr.entry[i].type = PJSIP_TRANSPORT_TLS;
+			else
+				tdata->dest_info.addr.entry[i].type = PJSIP_TRANSPORT_TCP;
 	    }
 	    tdata->dest_info.addr.count = count * 2;
 	}
     }
-#endif /* !PJSIP_DONT_SWITCH_TO_TCP */
 
     /* Process the addresses. */
     stateless_send_transport_cb( stateless_data, tdata, -PJ_EPENDING);
@@ -1351,7 +1368,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_send_request_stateless(pjsip_endpoint *endpt,
 	                     "address is already set",
 			     pjsip_tx_data_get_info(tdata)));
 	stateless_send_resolver_callback(PJ_SUCCESS, stateless_data,
-					 &tdata->dest_info.addr);
+					 &tdata->dest_info.addr, dest_info.addr.port);
     }
     return PJ_SUCCESS;
 }
@@ -1390,9 +1407,12 @@ struct send_raw_data
 /* Resolver callback for sending raw data. */
 static void send_raw_resolver_callback( pj_status_t status,
     					void *token,
-					const pjsip_server_addresses *addr)
+						const pjsip_server_addresses *addr,
+						int target_port)
 {
     struct send_raw_data *sraw_data = (struct send_raw_data*) token;
+
+	PJ_UNUSED_ARG(target_port);
 
     if (status != PJ_SUCCESS) {
 	if (sraw_data->app_cb) {
@@ -1450,6 +1470,8 @@ PJ_DEF(pj_status_t) pjsip_endpt_send_raw_to_uri(pjsip_endpoint *endpt,
     pjsip_host_info dest_info;
     pj_status_t status;
 
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
+
     /* Allocate buffer */
     status = pjsip_endpt_create_tdata(endpt, &tdata);
     if (status != PJ_SUCCESS)
@@ -1461,7 +1483,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_send_raw_to_uri(pjsip_endpoint *endpt,
     pj_strdup_with_null(tdata->pool, &dst_uri, p_dst_uri);
 
     /* Parse URI */
-    uri = pjsip_parse_uri(tdata->pool, dst_uri.ptr, dst_uri.slen, 0);
+    uri = pjsip_parse_uri(inst_id, tdata->pool, dst_uri.ptr, dst_uri.slen, 0);
     if (uri == NULL) {
 	pjsip_tx_data_dec_ref(tdata);
 	return PJSIP_EINVALIDURI;
@@ -1637,9 +1659,12 @@ static void send_response_transport_cb(void *token, pjsip_tx_data *tdata,
  * Resolver calback during send_response.
  */
 static void send_response_resolver_cb( pj_status_t status, void *token,
-				       const pjsip_server_addresses *addr )
+									  const pjsip_server_addresses *addr,
+									  int target_port )
 {
     pjsip_send_state *send_state = (pjsip_send_state*) token;
+
+	PJ_UNUSED_ARG(target_port);
 
     if (status != PJ_SUCCESS) {
 	if (send_state->app_cb) {

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pa_dev.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -185,10 +185,10 @@ static int PaRecorderCallback(const void *input,
      *   session will leave TLS set, but release the TLS data address,
      *   so the second session must re-register the callback's thread.
      */
-    if (stream->rec_thread_initialized == 0 || !pj_thread_is_registered()) 
+    if (stream->rec_thread_initialized == 0 || !pj_thread_is_registered(0))
     {
 	pj_bzero(stream->rec_thread_desc, sizeof(pj_thread_desc));
-	status = pj_thread_register("pa_rec", stream->rec_thread_desc, 
+	status = pj_thread_register(0, "pa_rec", stream->rec_thread_desc,
 				    &stream->rec_thread);
 	stream->rec_thread_initialized = 1;
 	PJ_LOG(5,(THIS_FILE, "Recorder thread started"));
@@ -298,10 +298,10 @@ static int PaPlayerCallback( const void *input,
      *   session will leave TLS set, but release the TLS data address,
      *   so the second session must re-register the callback's thread.
      */
-    if (stream->play_thread_initialized == 0 || !pj_thread_is_registered()) 
+    if (stream->play_thread_initialized == 0 || !pj_thread_is_registered(0))
     {
 	pj_bzero(stream->play_thread_desc, sizeof(pj_thread_desc));
-	status = pj_thread_register("portaudio", stream->play_thread_desc,
+	status = pj_thread_register(0, "portaudio", stream->play_thread_desc,
 				    &stream->play_thread);
 	stream->play_thread_initialized = 1;
 	PJ_LOG(5,(THIS_FILE, "Player thread started"));

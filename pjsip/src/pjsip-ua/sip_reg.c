@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_reg.c 4037 2012-04-11 09:41:25Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -242,8 +242,9 @@ static void set_expires( pjsip_regc *regc, pj_uint32_t expires)
 }
 
 
-static pj_status_t set_contact( pjsip_regc *regc,
-			        int contact_cnt,
+static pj_status_t set_contact( int inst_id,
+				pjsip_regc *regc,
+			    int contact_cnt,
 				const pj_str_t contact[] )
 {
     const pj_str_t CONTACT = { "Contact", 7 };
@@ -272,7 +273,7 @@ static pj_status_t set_contact( pjsip_regc *regc,
 
 	pj_strdup_with_null(regc->pool, &tmp, &contact[i]);
 	hdr = (pjsip_contact_hdr*)
-              pjsip_parse_hdr(regc->pool, &CONTACT, tmp.ptr, tmp.slen, NULL);
+              pjsip_parse_hdr(inst_id, regc->pool, &CONTACT, tmp.ptr, tmp.slen, NULL);
 	if (hdr == NULL) {
 	    PJ_LOG(4,(THIS_FILE, "Invalid Contact: \"%.*s\"", 
 		     (int)tmp.slen, tmp.ptr));
@@ -322,7 +323,8 @@ static pj_status_t set_contact( pjsip_regc *regc,
 }
 
 
-PJ_DEF(pj_status_t) pjsip_regc_init( pjsip_regc *regc,
+PJ_DEF(pj_status_t) pjsip_regc_init( int inst_id,
+					 pjsip_regc *regc,
 				     const pj_str_t *srv_url,
 				     const pj_str_t *from_url,
 				     const pj_str_t *to_url,
@@ -341,7 +343,7 @@ PJ_DEF(pj_status_t) pjsip_regc_init( pjsip_regc *regc,
 
     /* Set server URL. */
     tmp = regc->str_srv_url;
-    regc->srv_url = pjsip_parse_uri( regc->pool, tmp.ptr, tmp.slen, 0);
+    regc->srv_url = pjsip_parse_uri( inst_id, regc->pool, tmp.ptr, tmp.slen, 0);
     if (regc->srv_url == NULL) {
 	return PJSIP_EINVALIDURI;
     }
@@ -350,7 +352,7 @@ PJ_DEF(pj_status_t) pjsip_regc_init( pjsip_regc *regc,
     pj_strdup_with_null(regc->pool, &regc->from_uri, from_url);
     tmp = regc->from_uri;
     regc->from_hdr = pjsip_from_hdr_create(regc->pool);
-    regc->from_hdr->uri = pjsip_parse_uri(regc->pool, tmp.ptr, tmp.slen, 
+    regc->from_hdr->uri = pjsip_parse_uri(inst_id, regc->pool, tmp.ptr, tmp.slen, 
 					  PJSIP_PARSE_URI_AS_NAMEADDR);
     if (!regc->from_hdr->uri) {
 	PJ_LOG(4,(THIS_FILE, "regc: invalid source URI %.*s", 
@@ -361,7 +363,7 @@ PJ_DEF(pj_status_t) pjsip_regc_init( pjsip_regc *regc,
     /* Set "To" header. */
     pj_strdup_with_null(regc->pool, &tmp, to_url);
     regc->to_hdr = pjsip_to_hdr_create(regc->pool);
-    regc->to_hdr->uri = pjsip_parse_uri(regc->pool, tmp.ptr, tmp.slen, 
+    regc->to_hdr->uri = pjsip_parse_uri(inst_id, regc->pool, tmp.ptr, tmp.slen, 
 					PJSIP_PARSE_URI_AS_NAMEADDR);
     if (!regc->to_hdr->uri) {
 	PJ_LOG(4,(THIS_FILE, "regc: invalid target URI %.*s", to_url->slen, to_url->ptr));
@@ -370,7 +372,7 @@ PJ_DEF(pj_status_t) pjsip_regc_init( pjsip_regc *regc,
 
 
     /* Set "Contact" header. */
-    status = set_contact( regc, contact_cnt, contact);
+    status = set_contact( inst_id, regc, contact_cnt, contact);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -437,6 +439,17 @@ PJ_DEF(pj_status_t) pjsip_regc_set_transport( pjsip_regc *regc,
     pj_memcpy(&regc->tp_sel, sel, sizeof(*sel));
     pjsip_tpselector_add_ref(&regc->tp_sel);
 
+    return PJ_SUCCESS;
+}
+
+/* Release transport */
+PJ_DEF(pj_status_t) pjsip_regc_release_transport(pjsip_regc *regc)
+{
+    PJ_ASSERT_RETURN(regc, PJ_EINVAL);
+    if (regc->last_transport) {
+	pjsip_transport_dec_ref(regc->last_transport);
+	regc->last_transport = NULL;
+    }
     return PJ_SUCCESS;
 }
 
@@ -686,8 +699,9 @@ PJ_DEF(pj_status_t) pjsip_regc_unregister_all(pjsip_regc *regc,
 }
 
 
-PJ_DEF(pj_status_t) pjsip_regc_update_contact(  pjsip_regc *regc,
-					        int contact_cnt,
+PJ_DEF(pj_status_t) pjsip_regc_update_contact(  int inst_id,
+						pjsip_regc *regc,
+					    int contact_cnt,
 						const pj_str_t contact[] )
 {
     pj_status_t status;
@@ -695,7 +709,7 @@ PJ_DEF(pj_status_t) pjsip_regc_update_contact(  pjsip_regc *regc,
     PJ_ASSERT_RETURN(regc, PJ_EINVAL);
 
     pj_lock_acquire(regc->lock);
-    status = set_contact( regc, contact_cnt, contact );
+    status = set_contact( inst_id, regc, contact_cnt, contact );
     pj_lock_release(regc->lock);
 
     return status;
@@ -986,7 +1000,7 @@ static pj_int32_t calculate_response_expiration(const pjsip_regc *regc,
     }
 
     /* Must have expiration value by now */
-    pj_assert(expiration != NOEXP);
+	pj_assert(expiration != NOEXP);
 
     return expiration;
 }
@@ -1269,7 +1283,9 @@ PJ_DEF(pj_status_t) pjsip_regc_send(pjsip_regc *regc, pjsip_tx_data *tdata)
     pj_lock_acquire(regc->lock);
 
     /* Get last transport used and add reference to it */
-    if (tdata->tp_info.transport != regc->last_transport) {
+    if (tdata->tp_info.transport != regc->last_transport &&
+	status==PJ_SUCCESS)
+    {
 	if (regc->last_transport) {
 	    pjsip_transport_dec_ref(regc->last_transport);
 	    regc->last_transport = NULL;

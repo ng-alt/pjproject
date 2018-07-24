@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: auddemo.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -410,19 +410,19 @@ int main()
     pj_status_t status;
 
     /* Init pjlib */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status==PJ_SUCCESS, 1);
     
     pj_log_set_decor(PJ_LOG_HAS_NEWLINE);
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &cp, &pj_pool_factory_default_policy, 0);
 
     status = pjmedia_aud_subsys_init(&cp.factory);
     if (status != PJ_SUCCESS) {
 	app_perror("pjmedia_aud_subsys_init()", status);
 	pj_caching_pool_destroy(&cp);
-	pj_shutdown();
+	pj_shutdown(0);
 	return 1;
     }
 
@@ -559,11 +559,11 @@ int main()
 	    break;
 
 	case 'v':
-	    if (pj_log_get_level() <= 3) {
-		pj_log_set_level(5);
+	    if (pj_log_get_level(0) <= 3) {
+		pj_log_set_level(0, 5);
 		puts("Logging set to detail");
 	    } else {
-		pj_log_set_level(3);
+		pj_log_set_level(0, 3);
 		puts("Logging set to quiet");
 	    }
 	    break;
@@ -575,7 +575,7 @@ int main()
     }
 
     pj_caching_pool_destroy(&cp);
-    pj_shutdown();
+    pj_shutdown(0);
     return 0;
 }
 

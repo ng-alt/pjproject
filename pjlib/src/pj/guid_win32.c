@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: guid_win32.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -59,9 +59,11 @@ static void guid_to_str( GUID *guid, pj_str_t *str )
 }
 
 
-PJ_DEF(pj_str_t*) pj_generate_unique_string(pj_str_t *str)
+PJ_DEF(pj_str_t*) pj_generate_unique_string(int inst_id, pj_str_t *str)
 {
     GUID guid;
+
+	PJ_UNUSED_ARG(inst_id);
 
     PJ_CHECK_STACK();
 

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: strerror.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -50,13 +50,14 @@ int main(int argc, char *argv[])
 	return 1;
     }
 
-    pj_log_set_level(3);
+    pj_log_set_level(0, 3);
 
-    pj_init();
-    pj_caching_pool_init(&cp, NULL, 0);
+    pj_init(0);
+    pj_caching_pool_init(0, &cp, NULL, 0);
     pjlib_util_init();
     pjnath_init();
-    pjmedia_endpt_create(&cp.factory, NULL, 0, &med_ept);
+    //pjmedia_endpt_create(&cp.factory, NULL, 0, &med_ept);
+    pjmedia_endpt_create(0, &cp.factory, NULL, 0, 0, &med_ept);
     pjsip_endpt_create(&cp.factory, "localhost", &sip_ept);
     pjsip_evsub_init_module(sip_ept);
 
@@ -65,7 +66,7 @@ int main(int argc, char *argv[])
 
     printf("Status %d: %s\n", code, errmsg);
 
-    pj_shutdown();
+    pj_shutdown(0);
     return 0;
 }
 

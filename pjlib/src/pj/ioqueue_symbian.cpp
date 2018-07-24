@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ioqueue_symbian.cpp 3597 2011-06-22 15:50:57Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -752,6 +752,7 @@ PJ_DEF(pj_status_t) pj_ioqueue_send( pj_ioqueue_key_t *key,
 				     pj_ssize_t *length,
 				     pj_uint32_t flags )
 {
+	
     TRequestStatus reqStatus;
     TPtrC8 aBuffer((const TUint8*)data, (TInt)*length);
     TSockXfrLength aLen;

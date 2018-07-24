@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pjsip-perf.c 4404 2013-02-27 14:47:37Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -219,8 +219,8 @@ static pj_bool_t mod_stateless_on_rx_request(pjsip_rx_data *rdata)
 
     uri = pjsip_uri_get_uri(rdata->msg_info.msg->line.req.uri);
 
-    /* Only want to receive SIP scheme */
-    if (!PJSIP_URI_SCHEME_IS_SIP(uri))
+    /* Only want to receive SIP/SIPS scheme */
+    if (!PJSIP_URI_SCHEME_IS_SIP(uri) && !PJSIP_URI_SCHEME_IS_SIPS(uri))
 	return PJ_FALSE;
 
     sip_uri = (pjsip_sip_uri*) uri;
@@ -280,8 +280,8 @@ static pj_bool_t mod_stateful_on_rx_request(pjsip_rx_data *rdata)
 
     uri = pjsip_uri_get_uri(rdata->msg_info.msg->line.req.uri);
 
-    /* Only want to receive SIP scheme */
-    if (!PJSIP_URI_SCHEME_IS_SIP(uri))
+    /* Only want to receive SIP/SIPS scheme */
+    if (!PJSIP_URI_SCHEME_IS_SIP(uri) && !PJSIP_URI_SCHEME_IS_SIPS(uri))
 	return PJ_FALSE;
 
     sip_uri = (pjsip_sip_uri*) uri;
@@ -356,7 +356,7 @@ static pj_status_t send_response(pjsip_inv_session *inv,
     pj_status_t status;
 
     if (*has_initial) {
-	status = pjsip_inv_answer(inv, code, NULL, NULL, &tdata);
+	status = pjsip_inv_answer(0, inv, code, NULL, NULL, &tdata);
     } else {
 	status = pjsip_inv_initial_answer(inv, rdata, code, 
 					  NULL, NULL, &tdata);
@@ -364,7 +364,7 @@ static pj_status_t send_response(pjsip_inv_session *inv,
 
     if (status != PJ_SUCCESS) {
 	if (*has_initial) {
-	    status = pjsip_inv_answer(inv, PJSIP_SC_NOT_ACCEPTABLE, 
+	    status = pjsip_inv_answer(0, inv, PJSIP_SC_NOT_ACCEPTABLE,
 				      NULL, NULL, &tdata);
 	} else {
 	    status = pjsip_inv_initial_answer(inv, rdata, 
@@ -374,15 +374,15 @@ static pj_status_t send_response(pjsip_inv_session *inv,
 
 	if (status == PJ_SUCCESS) {
 	    *has_initial = PJ_TRUE;
-	    pjsip_inv_send_msg(inv, tdata); 
+	    pjsip_inv_send_msg(0, inv, tdata);
 	} else {
-	    pjsip_inv_terminate(inv, 500, PJ_FALSE);
+	    pjsip_inv_terminate(0, inv, 500, PJ_FALSE);
 	    return -1;
 	}
     } else {
 	*has_initial = PJ_TRUE;
 
-	status = pjsip_inv_send_msg(inv, tdata); 
+	status = pjsip_inv_send_msg(0, inv, tdata);
 	if (status != PJ_SUCCESS) {
 	    pjsip_tx_data_dec_ref(tdata);
 	    return status;
@@ -417,8 +417,8 @@ static pj_bool_t mod_call_on_rx_request(pjsip_rx_data *rdata)
 
     uri = pjsip_uri_get_uri(rdata->msg_info.msg->line.req.uri);
 
-    /* Only want to receive SIP scheme */
-    if (!PJSIP_URI_SCHEME_IS_SIP(uri))
+    /* Only want to receive SIP/SIPS scheme */
+    if (!PJSIP_URI_SCHEME_IS_SIP(uri) && !PJSIP_URI_SCHEME_IS_SIPS(uri))
 	return PJ_FALSE;
 
     sip_uri = (pjsip_sip_uri*) uri;
@@ -475,8 +475,8 @@ static pj_bool_t mod_call_on_rx_request(pjsip_rx_data *rdata)
     }
 
     /* Create UAS dialog */
-    status = pjsip_dlg_create_uas( pjsip_ua_instance(), rdata,
-				   &app.local_contact, &dlg);
+    status = pjsip_dlg_create_uas( 0, pjsip_ua_instance(0), rdata,
+				   &app.local_contact, NULL, &dlg);
     if (status != PJ_SUCCESS) {
 	const pj_str_t reason = pj_str("Unable to create dialog");
 	pjsip_endpt_respond_stateless( app.sip_endpt, rdata, 
@@ -720,7 +720,7 @@ static pj_status_t create_app(void)
 {
     pj_status_t status;
 
-    status = pj_init();
+    status = pj_init(0);
     if (status != PJ_SUCCESS) {
 	app_perror(THIS_FILE, "Error initializing pjlib", status);
 	return status;
@@ -731,7 +731,7 @@ static pj_status_t create_app(void)
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&app.cp, &pj_pool_factory_default_policy, 
+    pj_caching_pool_init(0, &app.cp, &pj_pool_factory_default_policy,
 			 CACHING_POOL_SIZE);
 
     /* Create application pool for misc. */
@@ -904,7 +904,7 @@ static void destroy_app()
     }
 
     /* Shutdown PJLIB */
-    pj_shutdown();
+    pj_shutdown(0);
 }
 
 
@@ -921,8 +921,10 @@ static pj_status_t init_media()
     /* Initialize media endpoint so that at least error subsystem is properly
      * initialized.
      */
-    status = pjmedia_endpt_create(&app.cp.factory, 
-				  pjsip_endpt_get_ioqueue(app.sip_endpt), 0, 
+	//charles modified
+	status = pjmedia_endpt_create( &app.cp.factory,
+				  //pjsip_endpt_get_ioqueue(app.sip_endpt), 0, 
+				  pjsip_endpt_get_ioqueue(app.sip_endpt), 0, 0, 0,
 				  &app.med_endpt);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
@@ -960,7 +962,7 @@ static pj_status_t init_media()
 
     /* Generate dummy SDP */
     dummy_sdp_str.slen = pj_ansi_strlen(dummy_sdp_str.ptr);
-    status = pjmedia_sdp_parse(app.pool, dummy_sdp_str.ptr, dummy_sdp_str.slen, 
+    status = pjmedia_sdp_parse(0, app.pool, &dummy_sdp_str.ptr, dummy_sdp_str.slen,
 			       &app.dummy_sdp);
     if (status != PJ_SUCCESS) {
 	app_perror(THIS_FILE, "Error parsing dummy SDP", status);
@@ -983,10 +985,10 @@ static void call_on_media_update( pjsip_inv_session *inv,
 	pjsip_tx_data *tdata;
 	pj_status_t status;
 
-	status = pjsip_inv_end_session(inv, PJSIP_SC_UNSUPPORTED_MEDIA_TYPE, 
+	status = pjsip_inv_end_session(0, inv, PJSIP_SC_UNSUPPORTED_MEDIA_TYPE,
 				       NULL, &tdata);
 	if (status == PJ_SUCCESS && tdata)
-	    status = pjsip_inv_send_msg(inv, tdata);
+	    status = pjsip_inv_send_msg(0, inv, tdata);
     }
 }
 
@@ -1014,9 +1016,9 @@ static void call_on_state_changed( pjsip_inv_session *inv,
 	//report_completion(200);
 	//inv->mod_data[mod_test.id] = (void*)1;
 
-	status = pjsip_inv_end_session(inv, PJSIP_SC_OK, NULL, &tdata);
+	status = pjsip_inv_end_session(0, inv, PJSIP_SC_OK, NULL, &tdata);
 	if (status == PJ_SUCCESS && tdata)
-	    status = pjsip_inv_send_msg(inv, tdata);
+	    status = pjsip_inv_send_msg(0, inv, tdata);
 
     } else if (inv->state == PJSIP_INV_STATE_DISCONNECTED) {
 	report_completion(inv->cause);
@@ -1047,7 +1049,7 @@ static pj_status_t make_call(const pj_str_t *dst_uri)
 
 
     /* Create UAC dialog */
-    status = pjsip_dlg_create_uac( pjsip_ua_instance(), 
+    status = pjsip_dlg_create_uac( 0, pjsip_ua_instance(0),
 				   &app.local_uri,	/* local URI	    */
 				   &app.local_contact,	/* local Contact    */
 				   dst_uri,		/* remote URI	    */
@@ -1091,7 +1093,7 @@ static pj_status_t make_call(const pj_str_t *dst_uri)
      * From now on, the invite session's state will be reported to us
      * via the invite session callbacks.
      */
-    status = pjsip_inv_send_msg(call->inv, tdata);
+    status = pjsip_inv_send_msg(0, call->inv, tdata);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
 
@@ -1118,7 +1120,7 @@ static pj_status_t verify_sip_url(const char *c_url)
     pj_ansi_strcpy(url, c_url);
     url[len] = '\0';
 
-    p = pjsip_parse_uri(pool, url, len, 0);
+    p = pjsip_parse_uri(0, pool, url, len, 0);
     if (!p || pj_stricmp2(pjsip_uri_get_scheme(p), "sip") != 0)
 	p = NULL;
 
@@ -1680,7 +1682,7 @@ int main(int argc, char *argv[])
     if (init_media() != 0)
 	return 1;
 
-    pj_log_set_level(app.log_level);
+    pj_log_set_level(0, app.log_level);
 
     if (app.log_level > 4) {
 	pjsip_endpt_register_module(app.sip_endpt, &msg_logger);
@@ -1864,4 +1866,3 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-

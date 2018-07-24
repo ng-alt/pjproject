@@ -6,6 +6,11 @@ include ../../build.mak
 include ../../version.mak
 include $(PJDIR)/build/common.mak
 
+THIRD_PARTY:=$(PJDIR)/third_party
+
+UMEM_INC=$(CC_INC)$(THIRD_PARTY)/umem
+UMEM_LIBS=-L$(THIRD_PARTY)/lib -lumem-$(TARGET_NAME) -ldl
+
 RULES_MAK := $(PJDIR)/build/rules.mak
 
 PJLIB_LIB:=$(PJDIR)/pjlib/lib/libpj-$(TARGET_NAME)$(LIBEXT)
@@ -15,23 +20,27 @@ export PJLIB_UTIL_LIB:=../lib/libpjlib-util-$(TARGET_NAME)$(LIBEXT)
 # Gather all flags.
 #
 export _CFLAGS 	:= $(CC_CFLAGS) $(OS_CFLAGS) $(HOST_CFLAGS) $(M_CFLAGS) \
-		   $(CFLAGS) $(CC_INC)../include $(CC_INC)../../pjlib/include
+		   $(CFLAGS) $(CC_INC)../include $(CC_INC)../../pjlib/include \
+		   $(UMEM_INC)
 export _CXXFLAGS:= $(_CFLAGS) $(CC_CXXFLAGS) $(OS_CXXFLAGS) $(M_CXXFLAGS) \
 		   $(HOST_CXXFLAGS) $(CXXFLAGS)
 export _LDFLAGS := $(subst /,$(HOST_PSEP),$(PJLIB_UTIL_LIB)) \
 		   $(subst /,$(HOST_PSEP),$(PJLIB_LIB)) \
 		   $(CC_LDFLAGS) $(OS_LDFLAGS) $(M_LDFLAGS) $(HOST_LDFLAGS) \
-		   $(LDFLAGS) 
+		   $(LDFLAGS) \
+		   $(UMEM_LIBS)
 
 ###############################################################################
 # Defines for building PJLIB-UTIL library
 #
 export PJLIB_UTIL_SRCDIR = ../src/pjlib-util
 export PJLIB_UTIL_OBJS += $(OS_OBJS) $(M_OBJS) $(CC_OBJS) $(HOST_OBJS) \
-		base64.o crc32.o errno.o dns.o dns_dump.o dns_server.o \
+		base64.o crc32.o dns.o dns_dump.o dns_server.o \
 		getopt.o hmac_md5.o hmac_sha1.o http_client.o md5.o pcap.o resolver.o \
-		scanner.o sha1.o srv_resolver.o string.o stun_simple.o \
-		stun_simple_client.o xml.o
+		scanner.o srv_resolver.o string.o stun_simple.o \
+		stun_simple_client.o xml.o \
+		errno_util.o sha1_lib_util.o
+#charles move errno.o to errno_util.o , sha1.o to sha1_lib_util.o
 export PJLIB_UTIL_CFLAGS += $(_CFLAGS)
 
 ###############################################################################

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: footprint.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -152,7 +152,7 @@ int dummy_function()
     pj_cis_add_alpha(NULL);
     pj_cis_add_str(NULL, NULL);
 
-    pj_scan_init(NULL, NULL, 0, 0, NULL);
+    pj_scan_init(0, NULL, NULL, 0, 0, NULL);
     pj_scan_fini(NULL);
     pj_scan_peek(NULL, NULL, NULL);
     pj_scan_peek_n(NULL, 0, NULL);
@@ -317,7 +317,7 @@ int dummy_function()
 #endif
 
 #ifdef HAS_PJMEDIA_SDP
-    pjmedia_sdp_parse(NULL, NULL, 1024, NULL);
+    pjmedia_sdp_parse(0, NULL, NULL, 1024, NULL);
     pjmedia_sdp_print(NULL, NULL, 1024);
     pjmedia_sdp_validate(NULL);
     pjmedia_sdp_session_clone(NULL, NULL);
@@ -341,7 +341,7 @@ int dummy_function()
     pjsip_ua_init_module(NULL, NULL);
     pjsip_ua_destroy();
     pjsip_dlg_create_uac(NULL, NULL, NULL, NULL, NULL, NULL);
-    pjsip_dlg_create_uas(NULL, NULL, NULL, NULL);
+    pjsip_dlg_create_uas(NULL, NULL, NULL, NULL, NULL);
     pjsip_dlg_terminate(NULL);
     pjsip_dlg_set_route_set(NULL, NULL);
     pjsip_dlg_create_request(NULL, NULL, -1, NULL);
@@ -651,4 +651,3 @@ int main()
   return test_main();
 }
 #endif
-

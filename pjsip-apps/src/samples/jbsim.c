@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: jbsim.c 3816 2011-10-14 04:15:15Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -268,12 +268,12 @@ static void write_log(struct log_entry *entry, pj_bool_t to_stdout)
 	printf("%s", log);
 }
 
-static void log_cb(int level, const char *data, int len)
+static void log_cb(int inst_id, int level, const char *data, int len)
 {
     struct log_entry entry;
 
     /* Write to stdout */
-    pj_log_write(level, data, len);
+    pj_log_write(inst_id, level, data, len, 0);
     puts("");
 
     /* Also add to CSV file */
@@ -428,7 +428,7 @@ static void test_destroy(void)
     if (g_app.pool)
 	pj_pool_release(g_app.pool);
     pj_caching_pool_destroy( &g_app.cp );
-    pj_shutdown();
+    pj_shutdown(0);
 }
 
 
@@ -438,11 +438,11 @@ static pj_status_t test_init(void)
     pj_status_t status;
 
     /* Must init PJLIB first: */
-    status = pj_init();
+    status = pj_init(0);
     PJ_ASSERT_RETURN(status == PJ_SUCCESS, status);
 
     /* Must create a pool factory before we can allocate any memory. */
-    pj_caching_pool_init(&g_app.cp, &pj_pool_factory_default_policy, 0);
+    pj_caching_pool_init(0, &g_app.cp, &pj_pool_factory_default_policy, 0);
 
     /* Pool */
     g_app.pool = pj_pool_create(&g_app.cp.factory, "g_app", 512, 512, NULL);
@@ -451,7 +451,7 @@ static pj_status_t test_init(void)
     if (g_app.cfg.log_file) {
 	status = pj_file_open(g_app.pool, g_app.cfg.log_file, 
 			      PJ_O_WRONLY,
-			      &g_app.log_fd);
+			      &g_app.log_fd, NULL);
 	if (status != PJ_SUCCESS) {
 	    jbsim_perror("Error writing output file", status);
 	    goto on_error;
@@ -465,7 +465,8 @@ static pj_status_t test_init(void)
      * Initialize media endpoint.
      * This will implicitly initialize PJMEDIA too.
      */
-    status = pjmedia_endpt_create(&g_app.cp.factory, NULL, 0, &g_app.endpt);
+    //status = pjmedia_endpt_create(&g_app.cp.factory, NULL, 0, &g_app.endpt);
+    status = pjmedia_endpt_create(0, &g_app.cp.factory, NULL, 0,0, &g_app.endpt);
     if (status != PJ_SUCCESS) {
 	jbsim_perror("Error creating media endpoint", status);
 	goto on_error;

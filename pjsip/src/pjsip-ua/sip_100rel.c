@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_100rel.c 4385 2013-02-27 10:11:59Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -59,7 +59,7 @@ static struct mod_100rel
 {
     pjsip_module	 mod;
     pjsip_endpoint	*endpt;
-} mod_100rel = 
+} mod_100rel_initializer = 
 {
     {
 	NULL, NULL,			    /* prev, next.		*/
@@ -78,6 +78,9 @@ static struct mod_100rel
     }
 
 };
+
+static struct mod_100rel mod_100rel[PJSUA_MAX_INSTANCES];
+static int is_initialized;
 
 /* List of pending transmission (may include the final response as well) */
 typedef struct tx_data_list_t
@@ -117,7 +120,22 @@ struct dlg_data
 	pjsip_inv_session	*inv;
 	uas_state_t		*uas_state;
 	uac_state_t		*uac_state_list;
+	int             inst_id;
 };
+
+static void mod_100rel_initialize()
+{
+	int i;
+	if(is_initialized)
+		return;
+
+	for (i=0; i < PJ_ARRAY_SIZE(mod_100rel); i++)
+	{
+		mod_100rel[i].mod = mod_100rel_initializer.mod;
+	}
+
+	is_initialized = 1;
+}
 
 
 /*****************************************************************************
@@ -128,11 +146,13 @@ struct dlg_data
  */
 static pj_status_t mod_100rel_load(pjsip_endpoint *endpt)
 {
-    mod_100rel.endpt = endpt;
-    pjsip_endpt_add_capability(endpt, &mod_100rel.mod, 
+	int inst_id = pjsip_endpt_get_inst_id(endpt);
+
+    mod_100rel[inst_id].endpt = endpt;
+    pjsip_endpt_add_capability(endpt, &mod_100rel[inst_id].mod, 
 			       PJSIP_H_ALLOW, NULL,
 			       1, &pjsip_prack_method.name);
-    pjsip_endpt_add_capability(endpt, &mod_100rel.mod, 
+    pjsip_endpt_add_capability(endpt, &mod_100rel[inst_id].mod, 
 			       PJSIP_H_SUPPORTED, NULL,
 			       1, &tag_100rel);
 
@@ -180,10 +200,17 @@ PJ_DEF(const pjsip_method*) pjsip_get_prack_method(void)
  */
 PJ_DEF(pj_status_t) pjsip_100rel_init_module(pjsip_endpoint *endpt)
 {
-    if (mod_100rel.mod.id != -1)
+	int inst_id;
+
+	mod_100rel_initialize(); // DEAN added
+	inst_id = pjsip_endpt_get_inst_id(endpt);
+
+    if (mod_100rel[inst_id].mod.id != -1)
 	return PJ_SUCCESS;
 
-    return pjsip_endpt_register_module(endpt, &mod_100rel.mod);
+	mod_100rel[inst_id].mod = mod_100rel_initializer.mod;
+
+    return pjsip_endpt_register_module(endpt, &mod_100rel[inst_id].mod);
 }
 
 
@@ -191,17 +218,17 @@ PJ_DEF(pj_status_t) pjsip_100rel_init_module(pjsip_endpoint *endpt)
  * API: attach 100rel support in invite session. Called by
  *      sip_inv.c
  */
-PJ_DEF(pj_status_t) pjsip_100rel_attach(pjsip_inv_session *inv)
+PJ_DEF(pj_status_t) pjsip_100rel_attach(int inst_id, pjsip_inv_session *inv)
 {
     dlg_data *dd;
 
     /* Check that 100rel module has been initialized */
-    PJ_ASSERT_RETURN(mod_100rel.mod.id >= 0, PJ_EINVALIDOP);
+    PJ_ASSERT_RETURN(mod_100rel[inst_id].mod.id >= 0, PJ_EINVALIDOP);
 
     /* Create and attach as dialog usage */
     dd = PJ_POOL_ZALLOC_T(inv->dlg->pool, dlg_data);
     dd->inv = inv;
-    pjsip_dlg_add_usage(inv->dlg, &mod_100rel.mod, (void*)dd);
+    pjsip_dlg_add_usage(inv->dlg, &mod_100rel[inst_id].mod, (void*)dd);
 
     PJ_LOG(5,(dd->inv->dlg->obj_name, "100rel module attached"));
 
@@ -244,9 +271,11 @@ PJ_DEF(pj_status_t) pjsip_100rel_create_prack( pjsip_inv_session *inv,
     pjsip_tx_data *tdata;
     pj_status_t status;
 
+	int inst_id = rdata->tp_info.pool->factory->inst_id;
+
     *p_tdata = NULL;
 
-    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel.mod.id];
+    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel[inst_id].mod.id];
     PJ_ASSERT_RETURN(dd != NULL, PJSIP_ENOTINITIALIZED);
 
     tsx = pjsip_rdata_get_tsx(rdata);
@@ -272,7 +301,7 @@ PJ_DEF(pj_status_t) pjsip_100rel_create_prack( pjsip_inv_session *inv,
     /* Find UAC state for the specified call leg */
     uac_state = dd->uac_state_list;
     while (uac_state) {
-	if (pj_strcmp(&uac_state->tag, to_tag)==0)
+	if (pj_stricmp(&uac_state->tag, to_tag)==0)
 	    break;
 	uac_state = uac_state->next;
     }
@@ -319,7 +348,7 @@ PJ_DEF(pj_status_t) pjsip_100rel_create_prack( pjsip_inv_session *inv,
     /* If this response is a forked response from a different call-leg,
      * update the req URI (https://trac.pjsip.org/repos/ticket/1364)
      */
-    if (pj_strcmp(&uac_state->tag, &dd->inv->dlg->remote.info->tag)) {
+    if (pj_stricmp(&uac_state->tag, &dd->inv->dlg->remote.info->tag)) {
 	const pjsip_contact_hdr *mhdr;
 
 	mhdr = (const pjsip_contact_hdr*)
@@ -360,13 +389,14 @@ PJ_DEF(pj_status_t) pjsip_100rel_send_prack( pjsip_inv_session *inv,
 					     pjsip_tx_data *tdata)
 {
     dlg_data *dd;
+	int inst_id = tdata->inst_id;
 
-    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel.mod.id];
+    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel[inst_id].mod.id];
     PJ_ASSERT_ON_FAIL(dd != NULL, 
     {pjsip_tx_data_dec_ref(tdata); return PJSIP_ENOTINITIALIZED; });
 
     return pjsip_dlg_send_request(inv->dlg, tdata, 
-				  mod_100rel.mod.id, (void*) dd);
+				  mod_100rel[inst_id].mod.id, (void*) dd);
 
 }
 
@@ -374,11 +404,11 @@ PJ_DEF(pj_status_t) pjsip_100rel_send_prack( pjsip_inv_session *inv,
 /*
  * Notify 100rel module that the invite session has been disconnected.
  */
-PJ_DEF(pj_status_t) pjsip_100rel_end_session(pjsip_inv_session *inv)
+PJ_DEF(pj_status_t) pjsip_100rel_end_session(int inst_id, pjsip_inv_session *inv)
 {
     dlg_data *dd;
 
-    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel.mod.id];
+    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel[inst_id].mod.id];
     if (!dd)
 	return PJ_SUCCESS;
 
@@ -452,12 +482,14 @@ PJ_DEF(pj_status_t) pjsip_100rel_on_rx_prack( pjsip_inv_session *inv,
     pj_str_t method;
     pj_status_t status;
 
+	int inst_id = rdata->tp_info.pool->factory->inst_id;
+
     tsx = pjsip_rdata_get_tsx(rdata);
     pj_assert(tsx != NULL);
 
     msg = rdata->msg_info.msg;
 
-    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel.mod.id];
+    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel[inst_id].mod.id];
     if (dd == NULL) {
 	/* UAC sends us PRACK while we didn't send reliable provisional 
 	 * response. Respond with 400 (?) 
@@ -571,7 +603,7 @@ static void on_retransmit(pj_timer_heap_t *timer_heap,
 	clear_all_responses(dd);
 
 	/* Send 500 response */
-	status = pjsip_inv_end_session(dd->inv, 500, &reason, &tdata);
+	status = pjsip_inv_end_session(dd->inst_id, dd->inv, 500, &reason, &tdata);
 	if (status == PJ_SUCCESS) {
 	    pjsip_dlg_send_response(dd->inv->dlg, 
 				    dd->inv->invite_tsx,
@@ -691,9 +723,13 @@ PJ_DEF(pj_status_t) pjsip_100rel_tx_response(pjsip_inv_session *inv,
     dlg_data *dd;
     pjsip_tx_data *old_tdata;
     pj_status_t status;
+
+	int inst_id;
     
     PJ_ASSERT_RETURN(tdata->msg->type == PJSIP_RESPONSE_MSG,
 		     PJSIP_ENOTRESPONSEMSG);
+
+	inst_id = tdata->inst_id;
     
     status_code = tdata->msg->line.status.code;
     
@@ -703,7 +739,7 @@ PJ_DEF(pj_status_t) pjsip_100rel_tx_response(pjsip_inv_session *inv,
     
 
     /* Get the 100rel data attached to this dialog */
-    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel.mod.id];
+    dd = (dlg_data*) inv->dlg->mod_data[mod_100rel[inst_id].mod.id];
     PJ_ASSERT_RETURN(dd != NULL, PJ_EINVALIDOP);
     
     
@@ -848,6 +884,7 @@ PJ_DEF(pj_status_t) pjsip_100rel_tx_response(pjsip_inv_session *inv,
 	    pj_list_init(&dd->uas_state->tx_data_list);
 	    dd->uas_state->retransmit_timer.user_data = dd;
 	    dd->uas_state->retransmit_timer.cb = &on_retransmit;
+		dd->uas_state->retransmit_timer.id = inst_id;
 	}
 	
 	/* Check that CSeq match */

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_util_statefull.c 4379 2013-02-27 09:54:51Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -38,7 +38,7 @@ static void mod_util_on_tsx_state(pjsip_transaction*, pjsip_event*);
 
 /* This module will be registered in pjsip_endpt.c */
 
-pjsip_module mod_stateful_util = 
+pjsip_module mod_stateful_util_initializer = 
 {
     NULL, NULL,			    /* prev, next.			*/
     { "mod-stateful-util", 17 },    /* Name.				*/
@@ -55,14 +55,21 @@ pjsip_module mod_stateful_util =
     &mod_util_on_tsx_state,	    /* on_tsx_state()			*/
 };
 
+pjsip_module mod_stateful_util[PJSUA_MAX_INSTANCES];
+
 static void mod_util_on_tsx_state(pjsip_transaction *tsx, pjsip_event *event)
 {
     struct tsx_data *tsx_data;
 
-    if (event->type != PJSIP_EVENT_TSX_STATE)
+	int inst_id = tsx->pool->factory->inst_id;
+
+    /* Check if the module has been unregistered (see ticket #1535) and also
+     * verify the event type.
+     */
+    if (mod_stateful_util[inst_id].id < 0 || event->type != PJSIP_EVENT_TSX_STATE)
 	return;
 
-    tsx_data = (struct tsx_data*) tsx->mod_data[mod_stateful_util.id];
+    tsx_data = (struct tsx_data*) tsx->mod_data[mod_stateful_util[inst_id].id];
     if (tsx_data == NULL)
 	return;
 
@@ -72,7 +79,7 @@ static void mod_util_on_tsx_state(pjsip_transaction *tsx, pjsip_event *event)
     /* Call the callback, if any, and prevent the callback to be called again
      * by clearing the transaction's module_data.
      */
-    tsx->mod_data[mod_stateful_util.id] = NULL;
+    tsx->mod_data[mod_stateful_util[inst_id].id] = NULL;
 
     if (tsx_data->cb) {
 	(*tsx_data->cb)(tsx_data->token, event);
@@ -90,14 +97,18 @@ PJ_DEF(pj_status_t) pjsip_endpt_send_request(  pjsip_endpoint *endpt,
     struct tsx_data *tsx_data;
     pj_status_t status;
 
+	int inst_id;
+
     PJ_ASSERT_RETURN(endpt && tdata && (timeout==-1 || timeout>0), PJ_EINVAL);
 
+	inst_id = pjsip_endpt_get_inst_id(endpt);
+
     /* Check that transaction layer module is registered to endpoint */
-    PJ_ASSERT_RETURN(mod_stateful_util.id != -1, PJ_EINVALIDOP);
+    PJ_ASSERT_RETURN(mod_stateful_util[inst_id].id != -1, PJ_EINVALIDOP);
 
     PJ_UNUSED_ARG(timeout);
 
-    status = pjsip_tsx_create_uac(&mod_stateful_util, tdata, &tsx);
+    status = pjsip_tsx_create_uac(inst_id, &mod_stateful_util[inst_id], tdata, &tsx);
     if (status != PJ_SUCCESS) {
 	pjsip_tx_data_dec_ref(tdata);
 	return status;
@@ -109,7 +120,7 @@ PJ_DEF(pj_status_t) pjsip_endpt_send_request(  pjsip_endpoint *endpt,
     tsx_data->token = token;
     tsx_data->cb = cb;
 
-    tsx->mod_data[mod_stateful_util.id] = tsx_data;
+    tsx->mod_data[mod_stateful_util[inst_id].id] = tsx_data;
 
     status = pjsip_tsx_send_msg(tsx, NULL);
     if (status != PJ_SUCCESS)

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sdp_cmp.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -43,7 +43,8 @@ static pj_status_t compare_conn(const pjmedia_sdp_conn *c1,
 }
 
 /* Compare attributes array. */
-static pj_status_t compare_attr_imp(unsigned count1,
+static pj_status_t compare_attr_imp(int inst_id, 
+					unsigned count1,
 				    pjmedia_sdp_attr *const attr1[],
 				    unsigned count2,
 				    pjmedia_sdp_attr *const attr2[])
@@ -109,7 +110,7 @@ static pj_status_t compare_attr_imp(unsigned count1,
 	    pjmedia_sdp_rtpmap r1, r2;
 	    const pjmedia_sdp_attr *a2;
 
-	    status = pjmedia_sdp_attr_get_rtpmap(a1, &r1);
+	    status = pjmedia_sdp_attr_get_rtpmap(inst_id, a1, &r1);
 	    if (status != PJ_SUCCESS)
 		return PJMEDIA_SDP_ERTPMAPNOTEQUAL;
 
@@ -117,7 +118,7 @@ static pj_status_t compare_attr_imp(unsigned count1,
 	    if (!a2)
 		return PJMEDIA_SDP_ERTPMAPNOTEQUAL;
 
-	    status = pjmedia_sdp_attr_get_rtpmap(a2, &r2);
+	    status = pjmedia_sdp_attr_get_rtpmap(inst_id, a2, &r2);
 	    if (status != PJ_SUCCESS)
 		return PJMEDIA_SDP_ERTPMAPNOTEQUAL;
 
@@ -137,18 +138,19 @@ static pj_status_t compare_attr_imp(unsigned count1,
 
 
 /* Compare attributes array. */
-static pj_status_t compare_attr(unsigned count1,
+static pj_status_t compare_attr(int inst_id, 
+				unsigned count1,
 				pjmedia_sdp_attr *const attr1[],
 				unsigned count2,
 				pjmedia_sdp_attr *const attr2[])
 {
     pj_status_t status;
 
-    status = compare_attr_imp(count1, attr1, count2, attr2);
+    status = compare_attr_imp(inst_id, count1, attr1, count2, attr2);
     if (status != PJ_SUCCESS)
 	return status;
 
-    status = compare_attr_imp(count2, attr2, count1, attr1);
+    status = compare_attr_imp(inst_id, count2, attr2, count1, attr1);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -156,7 +158,8 @@ static pj_status_t compare_attr(unsigned count1,
 }
 
 /* Compare media descriptor */
-PJ_DEF(pj_status_t) pjmedia_sdp_media_cmp( const pjmedia_sdp_media *sd1,
+PJ_DEF(pj_status_t) pjmedia_sdp_media_cmp( int inst_id, 
+					   const pjmedia_sdp_media *sd1,
 					   const pjmedia_sdp_media *sd2,
 					   unsigned option)
 {
@@ -208,7 +211,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_media_cmp( const pjmedia_sdp_media *sd1,
     }
 
     /* Compare attributes. */
-    status = compare_attr(sd1->attr_count, sd1->attr, 
+    status = compare_attr(inst_id, sd1->attr_count, sd1->attr, 
 			  sd2->attr_count, sd2->attr);
     if (status != PJ_SUCCESS)
 	return status;
@@ -220,7 +223,8 @@ PJ_DEF(pj_status_t) pjmedia_sdp_media_cmp( const pjmedia_sdp_media *sd1,
 /*
  * Compare two SDP session for equality.
  */
-PJ_DEF(pj_status_t) pjmedia_sdp_session_cmp( const pjmedia_sdp_session *sd1,
+PJ_DEF(pj_status_t) pjmedia_sdp_session_cmp( int inst_id, 
+						 const pjmedia_sdp_session *sd1,
 					     const pjmedia_sdp_session *sd2,
 					     unsigned option)
 {
@@ -275,7 +279,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_session_cmp( const pjmedia_sdp_session *sd1,
 	return PJMEDIA_SDP_ETIMENOTEQUAL;
 
     /* Compare attributes. */
-    status = compare_attr(sd1->attr_count, sd1->attr, 
+    status = compare_attr(inst_id, sd1->attr_count, sd1->attr, 
 			  sd2->attr_count, sd2->attr);
     if (status != PJ_SUCCESS)
 	return status;
@@ -285,7 +289,7 @@ PJ_DEF(pj_status_t) pjmedia_sdp_session_cmp( const pjmedia_sdp_session *sd1,
 	return PJMEDIA_SDP_EMEDIANOTEQUAL;
 
     for (i=0; i<sd1->media_count; ++i) {
-	status = pjmedia_sdp_media_cmp(sd1->media[i], sd2->media[i], 0);
+	status = pjmedia_sdp_media_cmp(inst_id, sd1->media[i], sd2->media[i], 0);
 	if (status != PJ_SUCCESS)
 	    return status;
     }

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: presence_body.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -88,7 +88,7 @@ PJ_DEF(pj_status_t) pjsip_pres_create_pidf( pj_pool_t *pool,
 	    //pj_create_unique_string(pool, &id);
 	    id.ptr = (char*)pj_pool_alloc(pool, PJ_GUID_STRING_LENGTH+2);
 	    id.ptr += 2;
-	    pj_generate_unique_string(&id);
+	    pj_generate_unique_string(pool->factory->inst_id, &id);
 	    id.ptr -= 2;
 	    id.ptr[0] = 'p';
 	    id.ptr[1] = 'j';
@@ -195,23 +195,23 @@ PJ_DEF(pj_status_t) pjsip_pres_create_xpidf( pj_pool_t *pool,
 /*
  * This is a utility function to parse PIDF body into PJSIP presence status.
  */
-PJ_DEF(pj_status_t) pjsip_pres_parse_pidf( pjsip_rx_data *rdata,
+PJ_DEF(pj_status_t) pjsip_pres_parse_pidf( int inst_id, pjsip_rx_data *rdata,
 					   pj_pool_t *pool,
 					   pjsip_pres_status *pres_status)
 {
-    return pjsip_pres_parse_pidf2((char*)rdata->msg_info.msg->body->data,
+    return pjsip_pres_parse_pidf2(inst_id, (char*)rdata->msg_info.msg->body->data,
 				  rdata->msg_info.msg->body->len,
 				  pool, pres_status);
 }
 
-PJ_DEF(pj_status_t) pjsip_pres_parse_pidf2(char *body, unsigned body_len,
+PJ_DEF(pj_status_t) pjsip_pres_parse_pidf2(int inst_id, char *body, unsigned body_len,
 					   pj_pool_t *pool,
 					   pjsip_pres_status *pres_status)
 {
     pjpidf_pres *pidf;
     pjpidf_tuple *pidf_tuple;
 
-    pidf = pjpidf_parse(pool, body, body_len);
+    pidf = pjpidf_parse(inst_id, pool, body, body_len);
     if (pidf == NULL)
 	return PJSIP_SIMPLE_EBADPIDF;
 
@@ -254,22 +254,22 @@ PJ_DEF(pj_status_t) pjsip_pres_parse_pidf2(char *body, unsigned body_len,
 /*
  * This is a utility function to parse X-PIDF body into PJSIP presence status.
  */
-PJ_DEF(pj_status_t) pjsip_pres_parse_xpidf(pjsip_rx_data *rdata,
+PJ_DEF(pj_status_t) pjsip_pres_parse_xpidf(int inst_id, pjsip_rx_data *rdata,
 					   pj_pool_t *pool,
 					   pjsip_pres_status *pres_status)
 {
-    return pjsip_pres_parse_xpidf2((char*)rdata->msg_info.msg->body->data,
+    return pjsip_pres_parse_xpidf2(inst_id, (char*)rdata->msg_info.msg->body->data,
 				   rdata->msg_info.msg->body->len,
 				   pool, pres_status);
 }
 
-PJ_DEF(pj_status_t) pjsip_pres_parse_xpidf2(char *body, unsigned body_len,
+PJ_DEF(pj_status_t) pjsip_pres_parse_xpidf2(int inst_id, char *body, unsigned body_len,
 					    pj_pool_t *pool,
 					    pjsip_pres_status *pres_status)
 {
     pjxpidf_pres *xpidf;
 
-    xpidf = pjxpidf_parse(pool, body, body_len);
+    xpidf = pjxpidf_parse(inst_id, pool, body, body_len);
     if (xpidf == NULL)
 	return PJSIP_SIMPLE_EBADXPIDF;
 

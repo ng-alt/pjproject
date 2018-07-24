@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: guid_uuid.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -32,8 +32,9 @@ PJ_DEF(unsigned) pj_GUID_STRING_LENGTH()
     return PJ_GUID_STRING_LENGTH;
 }
 
-PJ_DEF(pj_str_t*) pj_generate_unique_string(pj_str_t *str)
+PJ_DEF(pj_str_t*) pj_generate_unique_string(int inst_id, pj_str_t *str)
 {
+	PJ_UNUSED_ARG(inst_id);
     enum {GUID_LEN = 36};
     char sguid[GUID_LEN + 1];
     uuid_t uuid = {0};

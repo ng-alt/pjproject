@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: turn_sock.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -98,6 +98,17 @@ typedef struct pj_turn_sock_cb
 		     pj_turn_state_t old_state,
 		     pj_turn_state_t new_state);
 
+    /**
+	 * DEAN Added for change transport_ice's local_turn_srv
+	 *
+     * Notification when TURN server allocated. 
+	 *
+	 * @param turn_sock	    The TURN client transport.
+     * @param turn_srv	    The TURN server address that was allocated.
+     */
+	void (*on_turn_srv_allocated)(pj_turn_sock *turn_sock, 
+				pj_sockaddr_t *turn_srv);
+
 } pj_turn_sock_cb;
 
 
@@ -108,6 +119,14 @@ typedef struct pj_turn_sock_cb
  */
 typedef struct pj_turn_sock_cfg
 {
+    /**
+     * The group lock to be used by the STUN socket. If NULL, the STUN socket
+     * will create one internally.
+     *
+     * Default: NULL
+     */
+    pj_grp_lock_t *grp_lock;
+
     /**
      * QoS traffic type to be set on this transport. When application wants
      * to apply QoS tagging to the transport, it's preferable to set this
@@ -134,7 +153,82 @@ typedef struct pj_turn_sock_cfg
      */
     pj_bool_t qos_ignore_error;
 
+	/**
+	 * Buffer size for socket receive data.
+     *
+     */
+	int sock_recv_buf_size;
+
+	/**
+	 * Buffer size for socket send data.
+     *
+     */
+	int sock_send_buf_size;
+
 } pj_turn_sock_cfg;
+
+
+typedef struct pj_turn_server {
+	/**
+	 * Optional TURN socket settings. The default values will be
+	 * initialized by #pj_turn_sock_cfg_default(). This contains
+	 * settings such as QoS.
+	 */
+	pj_turn_sock_cfg     cfg;
+
+	/**
+	 * Specify the TURN server domain or hostname or IP address.
+	 * If DNS SRV resolution is required, application must fill
+	 * in this setting with the domain name of the TURN server 
+	 * and set the resolver instance in the \a resolver field.
+	 * Otherwise if the \a resolver setting is not set, this
+	 * field will be resolved with hostname resolution and in
+	 * this case the \a port field must be set.
+	 *
+	 * The \a port field should also be set even when DNS SRV
+	 * resolution is used, in case the DNS SRV resolution fails.
+	 *
+	 * When this field is empty, relay candidate will not be
+	 * created.
+	 *
+	 * The default value is empty.
+	 */
+	pj_str_t	     server;
+
+	/**
+	 * The port number of the TURN server, when \a server
+	 * field specifies a hostname rather than domain name. This
+	 * field should also be set even when the \a server
+	 * specifies a domain name, to allow DNS SRV resolution
+	 * to fallback to DNS A/AAAA resolution when the DNS SRV
+	 * resolution fails.
+	 *
+	 * Default is zero.
+	 */
+	pj_uint16_t	     port;
+
+	/**
+	 * Type of connection to the TURN server.
+	 *
+	 * Default is PJ_TURN_TP_UDP.
+	 */
+	pj_turn_tp_type	     conn_type;
+
+	/**
+	 * Credential to be used for the TURN session. This setting
+	 * is mandatory.
+	 *
+	 * Default is to have no credential.
+	 */
+	pj_stun_auth_cred    auth_cred;
+
+	/**
+	 * Optional TURN Allocate parameter. The default value will be
+	 * initialized by #pj_turn_alloc_param_default().
+	 */
+	pj_turn_alloc_param  alloc_param;
+
+} pj_turn_server;
 
 
 /**
@@ -210,6 +304,16 @@ PJ_DECL(pj_status_t) pj_turn_sock_set_user_data(pj_turn_sock *turn_sock,
  * @return		The user/application data.
  */
 PJ_DECL(void*) pj_turn_sock_get_user_data(pj_turn_sock *turn_sock);
+
+
+/**
+ * Get the group lock for this TURN transport.
+ *
+ * @param turn_sock	The TURN transport instance.
+ *
+ * @return	        The group lock.
+ */
+PJ_DECL(pj_grp_lock_t *) pj_turn_sock_get_grp_lock(pj_turn_sock *turn_sock);
 
 
 /**
@@ -314,7 +418,18 @@ PJ_DECL(pj_status_t) pj_turn_sock_alloc(pj_turn_sock *turn_sock,
 				        int default_port,
 				        pj_dns_resolver *resolver,
 				        const pj_stun_auth_cred *cred,
-				        const pj_turn_alloc_param *param);
+						const pj_turn_alloc_param *param);
+
+// 2013-05-08 DEAN added
+PJ_DECL(pj_status_t) pj_turn_sock_alloc2(pj_turn_sock *turn_sock,
+										const pj_str_t *domain,
+										int default_port,
+										pj_dns_resolver *resolver,
+										const pj_stun_auth_cred *cred,
+										const pj_turn_alloc_param *param,
+										int curr_turn,
+										int turn_cnt,
+										pj_turn_server turn_list[]);
 
 /**
  * Create or renew permission in the TURN server for the specified peer IP
@@ -384,6 +499,15 @@ PJ_DECL(pj_status_t) pj_turn_sock_bind_channel(pj_turn_sock *turn_sock,
 					       const pj_sockaddr_t *peer,
 					       unsigned addr_len);
 
+
+/**
+ * Check if turn use tcp transport
+ */
+PJ_DECL(pj_bool_t) pj_turn_sock_is_tp_tcp(pj_turn_sock *turn_sock);
+
+PJ_DECL(void *) pj_turn_sock_get_session(pj_turn_sock *turn_sock);
+
+PJ_DECL(pj_turn_tp_type) pj_turn_sock_get_conn_type(pj_turn_sock *turn_sock);
 
 /**
  * @}

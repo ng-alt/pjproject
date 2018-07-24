@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_msg.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -1382,7 +1382,26 @@ PJ_DECL(pj_status_t) pj_stun_msg_encode(pj_stun_msg *msg,
  *			message.
  */
 PJ_DECL(pj_status_t) pj_stun_msg_check(const pj_uint8_t *pdu, 
-				       pj_size_t pdu_len, unsigned options);
+									   pj_size_t pdu_len, unsigned options);
+
+
+/**
+ * Check that the PDU is potentially a valid DTLS record. This function
+ * is useful when application needs to multiplex DTLS recored with other
+ * application traffic. When this function returns PJ_SUCCESS, there is a
+ * big chance that the packet is a DTLS record.
+ *
+ * Note that we cannot be sure that the PDU is a really valid STUN message 
+ * until we actually parse the PDU.
+ *
+ * @param pdu		The packet buffer.
+ * @param pdu_len	The length of the packet buffer.
+ *
+ * @return		PJ_SUCCESS if the PDU is a potentially valid STUN
+ *			message.
+ */
+PJ_DECL(pj_status_t) pj_dtls_record_check(const pj_uint8_t *pdu, 
+									   pj_size_t pdu_len);
 
 
 /**

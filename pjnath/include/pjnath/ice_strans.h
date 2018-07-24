@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: ice_strans.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -28,6 +28,7 @@
 #include <pjnath/ice_session.h>
 #include <pjnath/stun_sock.h>
 #include <pjnath/turn_sock.h>
+#include <pjnath/tcp_sock.h>
 #include <pjlib-util/resolver.h>
 #include <pj/ioqueue.h>
 #include <pj/timer.h>
@@ -116,6 +117,25 @@ PJ_BEGIN_DECL
 /** Forward declaration for ICE stream transport. */
 typedef struct pj_ice_strans pj_ice_strans;
 
+/** 
+ * NATNL tunnel type.
+ */
+typedef enum natnl_tunnel_type
+{
+	/** NATNL tunnel using UNKNOWN */
+	NATNL_TUNNEL_TYPE_UNKNOWN,
+
+	/** NATNL tunnel using UPNP_TCP */
+	NATNL_TUNNEL_TYPE_UPNP_TCP,
+
+	/** NATNL tunnel using TURN */
+	NATNL_TUNNEL_TYPE_TURN,
+
+	/** NATNL tunnel using UDP */
+    NATNL_TUNNEL_TYPE_UDP,
+
+} natnl_tunnel_type;
+
 /** Transport operation types to be reported on \a on_status() callback */
 typedef enum pj_ice_strans_op
 {
@@ -128,9 +148,22 @@ typedef enum pj_ice_strans_op
     /** This operatino is used to report failure in keep-alive operation.
      *  Currently it is only used to report TURN Refresh failure.
      */
-    PJ_ICE_STRANS_OP_KEEP_ALIVE
+    PJ_ICE_STRANS_OP_KEEP_ALIVE,
+    /** This operatino is used to report failure in keep-alive operation.
+     *  Currently it is only used to report TURN Refresh failure.
+     */
+    PJ_ICE_STRANS_OP_ADDRESS_CHANGED
 
 } pj_ice_strans_op;
+
+/** Transport operation types to be reported on \a on_status() callback */
+typedef enum natnl_addr_changed_type
+{
+	ADDR_CHANGED_TYPE_NONE,
+	ADDR_CHANGED_TYPE_EXTERNAL,
+	ADDR_CHANGED_TYPE_LOCAL
+
+} natnl_addr_changed_type;
 
 /** 
  * This structure contains callbacks that will be called by the 
@@ -160,12 +193,48 @@ typedef struct pj_ice_strans_cb
      * Callback to report status of various ICE operations.
      * 
      * @param ice_st	    The ICE stream transport.
-     * @param op	    The operation which status is being reported.
-     * @param status	    Operation status.
+	 * @param op	    The operation which status is being reported.
+	 * @param status	    Operation status.
+	 * @param turn_mapped_addr	TURN socket mapped address if any, otherwise it is NULL.
      */
     void    (*on_ice_complete)(pj_ice_strans *ice_st, 
 			       pj_ice_strans_op op,
-			       pj_status_t status);
+			       pj_status_t status,
+				   pj_sockaddr *turn_mapped_addr);
+
+    /**
+	 * DEAN Added for change transport_ice's local_turn_srv
+	 *
+     * Notification when TURN server allocated. 
+	 *
+	 * @param ice_st	    The ICE stream transport.
+     * @param turn_srv	    The TURN server address that was allocated.
+     */
+	void (*on_turn_srv_allocated)(pj_ice_strans *ice_st, 
+					pj_sockaddr_t *turn_srv);
+
+	/**
+	* 2013-05-20 DEAN
+	* 2014-01-13 DEAN modified.
+	 * This call will be called when stun binding completes.
+	 * @param local_addr.		The server listening local address.
+	 * @param ip_changed_type type of ip changed.
+	 */
+	pj_status_t (*on_stun_binding_complete)(pj_ice_strans *ice_st,
+					pj_sockaddr *local_addr, 
+					natnl_addr_changed_type ip_changed_type);
+
+    /**
+     * Notification when TCP server has been created. Application should
+     * implement this callback to setup upnp port forwarding.
+	 *
+	 * @param ice_st	    The ICE stream transport.
+	 * @param external_addr.	The stun mapped address.
+	 * @param local_addr.		The server listening local address.
+     */
+	pj_status_t (*on_server_created)(pj_ice_strans *ice_st,
+					pj_sockaddr *external_addr,
+					pj_sockaddr *local_addr);
 
 } pj_ice_strans_cb;
 
@@ -274,67 +343,35 @@ typedef struct pj_ice_strans_cfg
     /**
      * TURN specific settings.
      */
+    pj_turn_server turn;	
+
+    /**
+     * TURN specific settings.
+     */
+    int turn_cnt;
+
+    /**
+     * TURN specific settings.
+     */
+    pj_turn_server turn_list[MAX_TURN_SERVER_COUNT];
+
+    /**
+     * TURN specific settings.
+     */
+    pj_turn_server rem_turn;
+
+    /**
+     * TCP specific settings.
+     */
     struct {
 	/**
-	 * Optional TURN socket settings. The default values will be
-	 * initialized by #pj_turn_sock_cfg_default(). This contains
+	 * Optional TCP socket settings. The default values will be
+	 * initialized by #pj_tcp_sock_cfg_default(). This contains
 	 * settings such as QoS.
 	 */
-	pj_turn_sock_cfg     cfg;
+	pj_tcp_sock_cfg     cfg;
 
-	/**
-	 * Specify the TURN server domain or hostname or IP address.
-	 * If DNS SRV resolution is required, application must fill
-	 * in this setting with the domain name of the TURN server 
-	 * and set the resolver instance in the \a resolver field.
-	 * Otherwise if the \a resolver setting is not set, this
-	 * field will be resolved with hostname resolution and in
-	 * this case the \a port field must be set.
-	 *
-	 * The \a port field should also be set even when DNS SRV
-	 * resolution is used, in case the DNS SRV resolution fails.
-	 *
-	 * When this field is empty, relay candidate will not be
-	 * created.
-	 *
-	 * The default value is empty.
-	 */
-	pj_str_t	     server;
-
-	/**
-	 * The port number of the TURN server, when \a server
-	 * field specifies a hostname rather than domain name. This
-	 * field should also be set even when the \a server
-	 * specifies a domain name, to allow DNS SRV resolution
-	 * to fallback to DNS A/AAAA resolution when the DNS SRV
-	 * resolution fails.
-	 *
-	 * Default is zero.
-	 */
-	pj_uint16_t	     port;
-
-	/**
-	 * Type of connection to the TURN server.
-	 *
-	 * Default is PJ_TURN_TP_UDP.
-	 */
-	pj_turn_tp_type	     conn_type;
-
-	/**
-	 * Credential to be used for the TURN session. This setting
-	 * is mandatory.
-	 *
-	 * Default is to have no credential.
-	 */
-	pj_stun_auth_cred    auth_cred;
-
-	/**
-	 * Optional TURN Allocate parameter. The default value will be
-	 * initialized by #pj_turn_alloc_param_default().
-	 */
-	pj_turn_alloc_param  alloc_param;
-
-    } turn;
+    } tcp;
 
     /**
      * Component specific settings, which will override the settings in
@@ -363,6 +400,20 @@ typedef struct pj_ice_strans_cfg
 	pj_qos_params qos_params;
 
     } comp[PJ_ICE_MAX_COMP];
+
+	//int			  use_upnp_flag;
+	int			  user_port_count;
+	struct {
+		pj_bool_t user_port_assigned;       // user selected port assigned
+		pj_uint16_t local_tcp_data_port;    // the user agent's local data port
+		pj_uint16_t external_tcp_data_port; // the external port for the incoming packet to local data port
+		pj_uint16_t local_tcp_ctl_port;     // the user agent's local control port
+		pj_uint16_t external_tcp_ctl_port;  // the external control port for the incoming packet to local port
+	} user_ports[MAX_USER_PORT_COUNT]; // user selected port pair
+
+	int      tnl_timeout_msec;          // tunnel timeout value in second.
+
+	int		 use_turn_flag;             // use turn flag. 0 : don't use turn, 1 : uas uses its own turn, 2 : uas uses uac's turn.
 
 } pj_ice_strans_cfg;
 
@@ -448,12 +499,20 @@ PJ_DECL(void) pj_ice_strans_cfg_copy(pj_pool_t *pool,
  * @return		PJ_SUCCESS if ICE stream transport is created
  *			successfully.
  */
-PJ_DECL(pj_status_t) pj_ice_strans_create(const char *name,
+PJ_DECL(pj_status_t) pj_ice_strans_create2(const char *name,
 					  const pj_ice_strans_cfg *cfg,
 					  unsigned comp_cnt,
 					  void *user_data,
 					  const pj_ice_strans_cb *cb,
+					  int tp_idx,
 					  pj_ice_strans **p_ice_st);
+
+PJ_DECL(pj_status_t) pj_ice_strans_create(const char *name,
+										  const pj_ice_strans_cfg *cfg,
+										  unsigned comp_cnt,
+										  void *user_data,
+										  const pj_ice_strans_cb *cb,
+										  pj_ice_strans **p_ice_st);
 
 /**
  * Get ICE session state.
@@ -522,6 +581,14 @@ PJ_DECL(pj_status_t) pj_ice_strans_get_options(pj_ice_strans *ice_st,
 PJ_DECL(pj_status_t) pj_ice_strans_set_options(pj_ice_strans *ice_st,
 					       const pj_ice_sess_options *opt);
 
+/**
+ * Get the group lock for this ICE stream transport.
+ *
+ * @param ice_st	The ICE stream transport.
+ *
+ * @return		The group lock.
+ */
+PJ_DECL(pj_grp_lock_t *) pj_ice_strans_get_grp_lock(pj_ice_strans *ice_st);
 
 /**
  * Initialize the ICE session in the ICE stream transport.
@@ -544,6 +611,10 @@ PJ_DECL(pj_status_t) pj_ice_strans_init_ice(pj_ice_strans *ice_st,
 					    pj_ice_sess_role role,
 					    const pj_str_t *local_ufrag,
 					    const pj_str_t *local_passwd);
+PJ_DECL(pj_status_t) pj_ice_strans_init_ice2(pj_ice_strans *ice_st,
+										   pj_ice_sess_role role,
+										   const pj_str_t *local_ufrag,
+										   const pj_str_t *local_passwd);
 
 /**
  * Check if the ICE stream transport has the ICE session created. The
@@ -742,6 +813,21 @@ pj_ice_strans_get_valid_pair(const pj_ice_strans *ice_st,
 			     unsigned comp_id);
 
 /**
+ * Retrieve the candidate pair that has been nominated and successfully
+ * checked for the specified component. If ICE negotiation is still in
+ * progress or it has failed, this function will return NULL.
+ *
+ * @param ice_st	The ICE stream transport.
+ * @param comp_id	Component ID.
+ *
+ * @return		The valid pair as ICE checklist structure if the
+ *			pair exist.
+ */
+PJ_DECL(const pj_ice_sess_check*) 
+pj_ice_strans_get_nominated_pair(const pj_ice_strans *ice_st,
+			     unsigned comp_id);
+
+/**
  * Stop and destroy the ICE session inside this media transport. Application
  * needs to call this function once the media session is over (the call has
  * been disconnected).
@@ -793,6 +879,67 @@ PJ_DECL(pj_status_t) pj_ice_strans_sendto(pj_ice_strans *ice_st,
 					  pj_size_t data_len,
 					  const pj_sockaddr_t *dst_addr,
 					  int dst_addr_len);
+
+PJ_DECL(void*) pj_ice_strans_get_ice_session(void *user_data);
+
+PJ_DECL(void* ) pj_ice_strans_get_ice_strans(void* user_data);
+
+PJ_DECL(unsigned int) pj_ice_strans_get_comp_id(void *user_data);
+
+PJ_DECL(pj_stun_session *) pj_ice_strans_get_stun_session(void *user_data);
+
+PJ_DECL(void *) pj_ice_strans_get_tcp_server_accepted_sess(void *user_data, unsigned comp_id, int tcp_sess_idx);
+
+PJ_DECL(void *) pj_ice_strans_get_tcp_client_sess(void *user_data, unsigned comp_id, int tcp_sess_idx);
+
+PJ_DECL(pj_bool_t) pj_ice_strans_tp_is_upnp_tcp(unsigned transport_id);
+
+PJ_DECL(pj_bool_t) pj_ice_strans_tp_is_stun(unsigned transport_id);
+
+PJ_DECL(pj_bool_t) pj_ice_strans_tp_is_turn(unsigned transport_id);
+
+PJ_DECL(natnl_tunnel_type) pj_ice_strans_get_use_tunnel_type(struct pj_ice_strans *ice_st);
+
+PJ_DECL(int) pj_ice_strans_get_transmit_count(struct pj_ice_strans *ice_st);
+
+PJ_DECL(void) pj_ice_strans_set_use_upnp_flag(void *user_data, int use_upnp_flag);
+
+PJ_DECL(void) pj_ice_strans_set_use_stun_cand(void *user_data, pj_bool_t use_stun_cand);
+
+PJ_DECL(void) pj_ice_strans_set_use_turn_flag(void *user_data, int use_turn_flag);
+
+PJ_DECL(void) pj_ice_strans_set_ice_role(void *user_data, pj_ice_sess_role ice_role);
+
+PJ_DECL(int) pj_ice_strans_get_wait_turn_cnt(struct pj_ice_strans *ice_st);
+
+PJ_DECL(void) pj_ice_strans_set_remote_turn_cfg(struct pj_ice_strans *ice_st,
+												pj_str_t server, pj_uint16_t port, pj_str_t realm,
+												pj_str_t username, pj_str_t password);
+
+PJ_DECL(void) pj_ice_strans_set_turn_password(struct pj_ice_strans *ice_st, pj_str_t password);
+
+PJ_DECL(void) pj_ice_strans_set_sess_fail(struct pj_ice_strans *ice_st,
+										 pj_ice_strans_op op, 
+										 const char *title, pj_status_t status);
+
+PJ_DECL(void) pj_ice_strans_set_app_lock(void *user_data, pj_mutex_t *lock);
+
+PJ_DECL(pj_bool_t) pj_ice_strans_get_local_path_selected(void *user_data);
+
+PJ_DECL(natnl_addr_changed_type) pj_ice_strans_get_addr_changed_type(void *user_data);
+
+PJ_DECL(pj_str_t *) pj_ice_strans_get_dest_uri(void *user_data);
+
+PJ_DECL(void) pj_ice_strans_set_dest_uri(struct pj_ice_strans *ice_st, pj_str_t *dest_uri);
+
+PJ_DECL(void) pj_ice_strans_set_check_tcp_session_ready(struct pj_ice_strans *ice_st, 
+													   int check_idx, pj_bool_t ready);
+
+PJ_DECL(void) pj_ice_strans_update_or_add_incoming_check(void *user_data,
+														 const pj_sockaddr_t *local_addr,
+														 const pj_sockaddr_t *peer_addr,
+														 int tcp_sess_idx);
+
 
 
 /**

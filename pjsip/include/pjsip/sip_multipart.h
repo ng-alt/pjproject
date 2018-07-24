@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_multipart.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -156,6 +156,7 @@ pjsip_multipart_find_part( const pjsip_msg_body *mp,
 /**
  * Parse multipart message.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool		Memory pool.
  * @param buf		Input buffer.
  * @param len		The buffer length.
@@ -164,7 +165,8 @@ pjsip_multipart_find_part( const pjsip_msg_body *mp,
  *
  * @return		Multipart message body.
  */
-PJ_DECL(pjsip_msg_body*) pjsip_multipart_parse(pj_pool_t *pool,
+PJ_DECL(pjsip_msg_body*) pjsip_multipart_parse(int inst_id,
+						   pj_pool_t *pool,
 					       char *buf, pj_size_t len,
 					       const pjsip_media_type *ctype,
 					       unsigned options);

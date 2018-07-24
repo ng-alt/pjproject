@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_simple_client.c 3896 2011-12-05 02:12:38Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -19,6 +19,7 @@
  */
 #include <pjlib-util/stun_simple.h>
 #include <pjlib-util/errno.h>
+#include <pj/compat/socket.h>
 #include <pj/log.h>
 #include <pj/os.h>
 #include <pj/pool.h>
@@ -44,7 +45,7 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
 {
     unsigned srv_cnt;
     pj_sockaddr_in srv_addr[2];
-    int i, j, send_cnt = 0;
+    int i, j, send_cnt = 0, nfds;
     pj_pool_t *pool;
     struct query_rec {
 	struct {
@@ -87,14 +88,14 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
     /* Resolve servers. */
     status = pj_sockaddr_in_init(&srv_addr[0], srv1, (pj_uint16_t)port1);
     if (status != PJ_SUCCESS)
-	goto on_error;
+		goto on_error;
 
     srv_cnt = 1;
 
     if (srv2 && port2) {
 	status = pj_sockaddr_in_init(&srv_addr[1], srv2, (pj_uint16_t)port2);
 	if (status != PJ_SUCCESS)
-	    goto on_error;
+		goto on_error;
 
 	if (srv_addr[1].sin_addr.s_addr != srv_addr[0].sin_addr.s_addr &&
 	    srv_addr[1].sin_port != srv_addr[0].sin_port)
@@ -112,6 +113,17 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
     wait_resp = sock_cnt * srv_cnt;
 
     TRACE_((THIS_FILE, "  Done initialization."));
+
+#if defined(PJ_SELECT_NEEDS_NFDS) && PJ_SELECT_NEEDS_NFDS!=0
+    nfds = -1;
+    for (i=0; i<sock_cnt; ++i) {
+	if (sock[i] > nfds) {
+	    nfds = sock[i];
+	}
+    }
+#else
+    nfds = FD_SETSIZE-1;
+#endif
 
     /* Main retransmission loop. */
     for (send_cnt=0; send_cnt<MAX_REQUEST; ++send_cnt) {
@@ -154,7 +166,7 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
 	next_tx.sec += (stun_timer[send_cnt]/1000);
 	next_tx.msec += (stun_timer[send_cnt]%1000);
 	pj_time_val_normalize(&next_tx);
-
+	
 	for (pj_gettimeofday(&now), select_rc=1; 
 	     status==PJ_SUCCESS && select_rc>=1 && wait_resp>0 
 	       && PJ_TIME_VAL_LT(now, next_tx); 
@@ -169,7 +181,7 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
 		PJ_FD_SET(sock[i], &r);
 	    }
 
-	    select_rc = pj_sock_select(PJ_IOQUEUE_MAX_HANDLES, &r, NULL, NULL, &timeout);
+	    select_rc = pj_sock_select(nfds+1, &r, NULL, NULL, &timeout);
 	    TRACE_((THIS_FILE, "  select() rc=%d", select_rc));
 	    if (select_rc < 1)
 		continue;
@@ -190,7 +202,7 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
 		status = pj_sock_recvfrom( sock[i], recv_buf, 
 				           &len, 0,
 				           (pj_sockaddr_t*)&addr,
-					   &addrlen);
+						   &addrlen);
 
 		if (status != PJ_SUCCESS) {
 		    char errmsg[PJ_ERR_MSG_SIZE];
@@ -288,7 +300,7 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
 	    mapped_addr[i].sin_port = (pj_uint16_t)rec[i].srv[0].mapped_port;
 
 	    if (rec[i].srv[0].mapped_addr == 0 || rec[i].srv[0].mapped_port == 0) {
-		status = PJLIB_UTIL_ESTUNNOTRESPOND;
+			status = PJLIB_UTIL_ESTUNNOTRESPOND;
 		break;
 	    }
 	} else if (rec[i].srv[0].mapped_addr == rec[i].srv[1].mapped_addr &&
@@ -299,7 +311,7 @@ PJ_DEF(pj_status_t) pjstun_get_mapped_addr( pj_pool_factory *pf,
 	    mapped_addr[i].sin_port = (pj_uint16_t)rec[i].srv[0].mapped_port;
 
 	    if (rec[i].srv[0].mapped_addr == 0 || rec[i].srv[0].mapped_port == 0) {
-		status = PJLIB_UTIL_ESTUNNOTRESPOND;
+			status = PJLIB_UTIL_ESTUNNOTRESPOND;
 		break;
 	    }
 	} else {

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -49,7 +49,7 @@ pj_status_t create_stun_config(pj_pool_t *pool, pj_stun_config *stun_cfg)
 	return status;
     }
 
-    pj_stun_config_init(stun_cfg, mem, 0, ioqueue, timer_heap);
+    pj_stun_config_init(0, stun_cfg, mem, 0, ioqueue, timer_heap);
 
     return PJ_SUCCESS;
 }
@@ -156,18 +156,18 @@ static int test_inner(void)
     mem = &caching_pool.factory;
 
 #if 1
-    pj_log_set_level(3);
+    pj_log_set_level(0, 3);
     pj_log_set_decor(param_log_decor);
 #endif
 
-    rc = pj_init();
+    rc = pj_init(0);
     if (rc != 0) {
 	app_perror("pj_init() error!!", rc);
 	return rc;
     }
     
     pj_dump_config();
-    pj_caching_pool_init( &caching_pool, &pj_pool_factory_default_policy, 0 );
+    pj_caching_pool_init( 0, &caching_pool, &pj_pool_factory_default_policy, 0 );
 
     pjlib_util_init();
     pjnath_init();
@@ -197,15 +197,15 @@ int test_main(void)
 {
     PJ_USE_EXCEPTION;
 
-    PJ_TRY {
+    PJ_TRY(0) {
         return test_inner();
     }
     PJ_CATCH_ANY {
         int id = PJ_GET_EXCEPTION();
         PJ_LOG(3,("test", "FATAL: unhandled exception id %d (%s)", 
-                  id, pj_exception_id_name(id)));
+                  id, pj_exception_id_name(0, id)));
     }
-    PJ_END;
+    PJ_END(0);
 
     return -1;
 }

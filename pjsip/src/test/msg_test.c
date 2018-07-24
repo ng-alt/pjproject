@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: msg_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -272,7 +272,7 @@ static pj_status_t test_entry( pj_pool_t *pool, struct test_msg *entry )
     /* Detect message. */
     var.detect_len = var.detect_len + entry->len;
     pj_get_timestamp(&t1);
-    status = pjsip_find_msg(entry->msg, entry->len, PJ_FALSE, &msg_size);
+    status = pjsip_find_msg(0, entry->msg, entry->len, PJ_FALSE, &msg_size);
     if (status != PJ_SUCCESS) {
 	if (status!=PJSIP_EPARTIALMSG || 
 	    entry->expected_status!=STATUS_PARTIAL)
@@ -297,7 +297,7 @@ parse_msg:
     var.parse_len = var.parse_len + entry->len;
     pj_get_timestamp(&t1);
     pj_list_init(&err_list);
-    parsed_msg = pjsip_parse_msg(pool, entry->msg, entry->len, &err_list);
+    parsed_msg = pjsip_parse_msg(0, pool, entry->msg, entry->len, &err_list);
     if (parsed_msg == NULL) {
 	if (entry->expected_status != STATUS_SYNTAX_ERROR) {
 	    status = -10;
@@ -826,7 +826,7 @@ static pj_status_t simple_test(void)
 
     PJ_LOG(3,(THIS_FILE, "  simple test.."));
     
-    status = pjsip_parse_status_line(stbuf, pj_ansi_strlen(stbuf), &st_line);
+    status = pjsip_parse_status_line(0, stbuf, pj_ansi_strlen(stbuf), &st_line);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -1911,7 +1911,7 @@ static int hdr_test(void)
 	hcontent = test->hcontent;
 #endif
 	
-	parsed_hdr1 = (pjsip_hdr*) pjsip_parse_hdr(pool, &hname, 
+	parsed_hdr1 = (pjsip_hdr*) pjsip_parse_hdr(0, pool, &hname, 
 						   hcontent, len, 
 						   &parsed_len);
 	if (parsed_hdr1 == NULL) {
@@ -1942,7 +1942,7 @@ static int hdr_test(void)
 	    hcontent = test->hcontent;
 #endif
 
-	    parsed_hdr2 = (pjsip_hdr*) pjsip_parse_hdr(pool, &hname, hcontent, len, &parsed_len);
+	    parsed_hdr2 = (pjsip_hdr*) pjsip_parse_hdr(0, pool, &hname, hcontent, len, &parsed_len);
 	    if (parsed_hdr2 == NULL) {
 		PJ_LOG(3,(THIS_FILE, "    error parsing header %s: %s", test->hshort_name, test->hcontent));
 		return -510;

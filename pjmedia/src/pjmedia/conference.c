@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: conference.c 4381 2013-02-27 10:02:04Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -1098,11 +1098,15 @@ PJ_DEF(pj_status_t) pjmedia_conf_remove_port( pjmedia_conf *conf,
      * device's threads!
      */
 
+	PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() pj_mutex_lock() inst_id=%d", 
+		pj_get_mutex_inst_id(conf->mutex)));
     pj_mutex_lock(conf->mutex);
 
     /* Port must be valid. */
     conf_port = conf->ports[port];
     if (conf_port == NULL) {
+		PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() pj_mutex_unlock1() inst_id=%d", 
+			pj_get_mutex_inst_id(conf->mutex)));
 	pj_mutex_unlock(conf->mutex);
 	return PJ_EINVAL;
     }
@@ -1110,6 +1114,8 @@ PJ_DEF(pj_status_t) pjmedia_conf_remove_port( pjmedia_conf *conf,
     conf_port->tx_setting = PJMEDIA_PORT_DISABLE;
     conf_port->rx_setting = PJMEDIA_PORT_DISABLE;
 
+	PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() conf->max_ports=%d", 
+		conf->max_ports));
     /* Remove this port from transmit array of other ports. */
     for (i=0; i<conf->max_ports; ++i) {
 	unsigned j;
@@ -1133,7 +1139,9 @@ PJ_DEF(pj_status_t) pjmedia_conf_remove_port( pjmedia_conf *conf,
 		break;
 	    }
 	}
-    }
+	}
+	PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() pj_array_erase() inst_id=%d", 
+		pj_get_mutex_inst_id(conf->mutex)));
 
     /* Update transmitter_cnt of ports we're transmitting to */
     while (conf_port->listener_cnt) {
@@ -1146,7 +1154,9 @@ PJ_DEF(pj_status_t) pjmedia_conf_remove_port( pjmedia_conf *conf,
 	--conf_port->listener_cnt;
 	pj_assert(conf->connect_cnt > 0);
 	--conf->connect_cnt;
-    }
+	}
+	PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() Update transmitter_cnt inst_id=%d", 
+		pj_get_mutex_inst_id(conf->mutex)));
 
     /* Destroy pjmedia port if this conf port is passive port,
      * i.e: has delay buf.
@@ -1154,12 +1164,16 @@ PJ_DEF(pj_status_t) pjmedia_conf_remove_port( pjmedia_conf *conf,
     if (conf_port->delay_buf) {
 	pjmedia_port_destroy(conf_port->port);
 	conf_port->port = NULL;
-    }
+	}
+	PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() pjmedia_port_destroy() inst_id=%d", 
+		pj_get_mutex_inst_id(conf->mutex)));
 
     /* Remove the port. */
     conf->ports[port] = NULL;
     --conf->port_cnt;
 
+	PJ_LOG(4, (THIS_FILE, "pjmedia_conf_remove_port() pj_mutex_unlock2() inst_id=%d", 
+		pj_get_mutex_inst_id(conf->mutex)));
     pj_mutex_unlock(conf->mutex);
 
 
@@ -1800,13 +1814,16 @@ static pj_status_t get_frame(pjmedia_port *this_port,
     for (i=0, ci=0; i<conf->max_ports && ci < conf->port_cnt; ++i) {
 	struct conf_port *conf_port = conf->ports[i];
 
-	/* Skip empty slot. */
+	/* Skip empty port. */
 	if (!conf_port)
 	    continue;
 
+	/* Var "ci" is to count how many ports have been visited so far. */
 	++ci;
 
-	/* Reset buffer & auto adjustment level for mixed signal */
+	/* Reset buffer (only necessary if the port has transmitter) and
+	 * reset auto adjustment level for mixed signal.
+	 */
 	conf_port->mix_adj = NORMAL_LEVEL;
 	if (conf_port->transmitter_cnt) {
 	    pj_bzero(conf_port->mix_buf,
@@ -1945,6 +1962,7 @@ static pj_status_t get_frame(pjmedia_port *this_port,
 
 	    mix_buf = listener->mix_buf;
 
+	    if (listener->transmitter_cnt > 1) {
 	    /* Mixing signals,
 	     * and calculate appropriate level adjustment if there is
 	     * any overflowed level in the mixed signal.
@@ -1962,6 +1980,15 @@ static pj_status_t get_frame(pjmedia_port *this_port,
 
 		} /* if any overflow in the mixed signals */
 	    } /* loop mixing signals */
+	    } else {
+		/* Only 1 transmitter:
+		 * just copy the samples to the mix buffer
+		 * no mixing and level adjustment needed
+		 */
+		for (k=0; k<conf->samples_per_frame; ++k) {
+		    mix_buf[k] = p_in[k];
+		}
+	    }
 	} /* loop the listeners of conf port */
     } /* loop of all conf ports */
 

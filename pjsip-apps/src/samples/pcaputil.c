@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: pcaputil.c 3816 2011-10-14 04:15:15Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -110,7 +110,7 @@ static void cleanup()
     if (app.mept) pjmedia_endpt_destroy(app.mept);
     if (app.pool) pj_pool_release(app.pool);
     pj_caching_pool_destroy(&app.cp);
-    pj_shutdown();
+    pj_shutdown(0);
 }
 
 static void err_exit(const char *title, pj_status_t status)
@@ -551,13 +551,15 @@ int main(int argc, char *argv[])
     input = pj_str(argv[pj_optind]);
     output = pj_str(argv[pj_optind+1]);
     
-    T( pj_init() );
+    T( pj_init(0) );
 
-    pj_caching_pool_init(&app.cp, NULL, 0);
+    pj_caching_pool_init(0, &app.cp, NULL, 0);
     app.pool = pj_pool_create(&app.cp.factory, "pcaputil", 1000, 1000, NULL);
 
     T( pjlib_util_init() );
-    T( pjmedia_endpt_create(&app.cp.factory, NULL, 0, &app.mept) );
+	//charles modified
+    //T( pjmedia_endpt_create(&app.cp.factory, NULL, 0, &app.mept) );
+    T( pjmedia_endpt_create(0, &app.cp.factory, NULL, 0, 0, &app.mept) );
 
     T( pj_pcap_open(app.pool, input.ptr, &app.pcap) );
     T( pj_pcap_set_filter(app.pcap, &filter) );

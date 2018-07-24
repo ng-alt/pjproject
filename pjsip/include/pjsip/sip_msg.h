@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_msg.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -244,11 +244,12 @@ typedef enum pjsip_hdr_e
     PJSIP_H_SUPPORTED,
     PJSIP_H_TIMESTAMP_UNIMP,		/* N/A, use pjsip_generic_string_hdr */
     PJSIP_H_TO,
-    PJSIP_H_UNSUPPORTED,
-    PJSIP_H_USER_AGENT_UNIMP,		/* N/A, use pjsip_generic_string_hdr */
+	PJSIP_H_UNSUPPORTED,
+    PJSIP_H_USER_AGENT,
     PJSIP_H_VIA,
     PJSIP_H_WARNING_UNIMP,		/* N/A, use pjsip_generic_string_hdr */
-    PJSIP_H_WWW_AUTHENTICATE,
+	PJSIP_H_WWW_AUTHENTICATE,
+	PJSIP_H_TNL_SUPPORTED,
 
     PJSIP_H_OTHER
 
@@ -974,6 +975,17 @@ PJ_DECL(pj_ssize_t) pjsip_msg_print(const pjsip_msg *msg,
  */
 #define PJSIP_MSG_TO_HDR(msg) \
 	    ((pjsip_to_hdr*)pjsip_msg_find_hdr(msg, PJSIP_H_TO, NULL))
+
+
+/**
+ * DEAN Added
+ * Find User-Agent header.
+ *
+ * @param msg	The message.
+ * @return	User-Agent header instance.
+ */
+#define PJSIP_MSG_USER_AGENT_HDR(msg) \
+	    ((pjsip_user_agent_hdr*)pjsip_msg_find_hdr(msg, PJSIP_H_USER_AGENT, NULL))
 
 
 /**
@@ -1833,6 +1845,33 @@ PJ_DECL(pjsip_unsupported_hdr*) pjsip_unsupported_hdr_init( pj_pool_t *pool,
 
 /* **************************************************************************/
 /**
+ * Tnl-Supported header.
+ */
+typedef pjsip_generic_array_hdr pjsip_tnl_supported_hdr;
+
+/**
+ * Create new Tnl-Supported header instance.
+ *
+ * @param pool	    The pool.
+ *
+ * @return	    New Tnl-Supported header instance.
+ */
+PJ_DECL(pjsip_tnl_supported_hdr*) pjsip_tnl_supported_hdr_create(pj_pool_t *pool);
+
+/**
+ * Initialize a preallocated memory with the header structure. 
+ *
+ * @param pool	    Pool for additional memory allocation if required.
+ * @param mem	    Pre-allocated memory to be initialized as the header.
+ *
+ * @return	    The header instance, which points to the same memory 
+ *		    location as the mem argument.
+ */
+PJ_DECL(pjsip_tnl_supported_hdr*) pjsip_tnl_supported_hdr_init( pj_pool_t *pool,
+							    void *mem );
+
+/* **************************************************************************/
+/**
  * SIP Via header.
  * In this implementation, Via header can only have one element in each header.
  * If a message arrives with multiple elements in a single Via, then they will
@@ -1913,6 +1952,48 @@ PJ_DECL(pjsip_warning_hdr*)
 pjsip_warning_hdr_create_from_status( pj_pool_t *pool,
 				      const pj_str_t *host,
 				      pj_status_t status);
+
+/* **************************************************************************/
+
+/**
+ * Dean Added
+ * User-Agent header.
+ */
+typedef struct pjsip_user_agent_hdr
+{
+    PJSIP_DECL_HDR_MEMBER(struct pjsip_user_agent_hdr);
+    pj_str_t user_agent;	    /**< User-Agent string. */
+} pjsip_user_agent_hdr;
+
+
+/**
+ * Dean Added
+ * Create new User-Agent header.
+ *
+ * @param pool	The pool.
+ *
+ * @return	new User-Agent header.
+ */
+PJ_DECL(pjsip_user_agent_hdr*) pjsip_user_agent_hdr_create( pj_pool_t *pool );
+
+
+/**
+ * Dean Added
+ * Initialize a preallocated memory with the header structure. This function
+ * should only be called when application uses its own memory allocation to
+ * allocate memory block for the specified header (e.g. in C++, when the 
+ * header is allocated with "new" operator).
+ * For normal applications, they should use pjsip_xxx_hdr_create() instead,
+ * which allocates memory and initialize it in one go.
+ *
+ * @param pool	    Pool for additional memory allocation if required.
+ * @param mem	    Pre-allocated memory to be initialized as the header.
+ *
+ * @return	    The header instance, which points to the same memory 
+ *		    location as the mem argument.
+ */
+PJ_DECL(pjsip_user_agent_hdr*) pjsip_user_agent_hdr_init( pj_pool_t *pool,
+					    void *mem );
 
 /* **************************************************************************/
 /** Accept-Encoding header. */
@@ -2025,12 +2106,6 @@ typedef pjsip_generic_string_hdr pjsip_timestamp_hdr;
 
 /** Create Timestamp header. */
 #define pjsip_timestamp_hdr_create pjsip_generic_string_hdr_create
-
-/** User-Agent header. */
-typedef pjsip_generic_string_hdr pjsip_user_agent_hdr;
-
-/** Create User-Agent header. */
-#define pjsip_user_agent_hdr_create pjsip_generic_string_hdr_create
 
 
 /**

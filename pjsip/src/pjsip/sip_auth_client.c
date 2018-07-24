@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_auth_client.c 4399 2013-02-27 14:26:03Z riza $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -920,13 +920,13 @@ PJ_DEF(pj_status_t) pjsip_auth_clt_init_req( pjsip_auth_clt_sess *sess,
 	 * or add an empty authorization header.
 	 */
 	unsigned i;
-	char *uri_str;
-	int len;
+	pj_str_t uri;
 
-	uri_str = (char*)pj_pool_alloc(tdata->pool, PJSIP_MAX_URL_SIZE);
-	len = pjsip_uri_print(PJSIP_URI_IN_REQ_URI, tdata->msg->line.req.uri,
-			      uri_str, PJSIP_MAX_URL_SIZE);
-	if (len < 1 || len >= PJSIP_MAX_URL_SIZE)
+	uri.ptr = (char*)pj_pool_alloc(tdata->pool, PJSIP_MAX_URL_SIZE);
+	uri.slen = pjsip_uri_print(PJSIP_URI_IN_REQ_URI,
+	                           tdata->msg->line.req.uri,
+	                           uri.ptr, PJSIP_MAX_URL_SIZE);
+	if (uri.slen < 1 || uri.slen >= PJSIP_MAX_URL_SIZE)
 	    return PJSIP_EURITOOLONG;
 
 	for (i=0; i<sess->cred_cnt; ++i) {
@@ -946,8 +946,7 @@ PJ_DEF(pj_status_t) pjsip_auth_clt_init_req( pjsip_auth_clt_sess *sess,
 			  &c->username);
 		pj_strdup(tdata->pool, &hs->credential.digest.realm,
 			  &c->realm);
-		pj_strdup2(tdata->pool, &hs->credential.digest.uri,
-			   uri_str);
+		pj_strdup(tdata->pool, &hs->credential.digest.uri, &uri);
 		pj_strdup(tdata->pool, &hs->credential.digest.algorithm,
 			  &sess->pref.algorithm);
 
@@ -1103,6 +1102,7 @@ PJ_DEF(pj_status_t) pjsip_auth_clt_reinit_req(	pjsip_auth_clt_sess *sess,
 		     PJSIP_EINVALIDSTATUS);
 
     tdata = old_request;
+    tdata->auth_retry = PJ_FALSE;
     
     /*
      * Respond to each authentication challenge.
@@ -1173,6 +1173,9 @@ PJ_DEF(pj_status_t) pjsip_auth_clt_reinit_req(	pjsip_auth_clt_sess *sess,
 
     /* Must invalidate the message! */
     pjsip_tx_data_invalidate_msg(tdata);
+
+    /* Retrying.. */
+    tdata->auth_retry = PJ_TRUE;
 
     /* Increment reference counter. */
     pjsip_tx_data_add_ref(tdata);

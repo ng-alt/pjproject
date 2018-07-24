@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_multipart.c 3815 2011-10-14 02:08:44Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  *
@@ -411,7 +411,8 @@ pjsip_multipart_find_part( const pjsip_msg_body *mp,
 }
 
 /* Parse a multipart part. "pct" is parent content-type  */
-static pjsip_multipart_part *parse_multipart_part(pj_pool_t *pool,
+static pjsip_multipart_part *parse_multipart_part(int inst_id,
+						  pj_pool_t *pool,
 						  char *start,
 						  pj_size_t len,
 						  const pjsip_media_type *pct)
@@ -456,7 +457,7 @@ static pjsip_multipart_part *parse_multipart_part(pj_pool_t *pool,
 	pjsip_hdr *hdr;
 	pj_status_t status;
 
-	status = pjsip_parse_headers(pool, start, end_hdr-start, 
+	status = pjsip_parse_headers(inst_id, pool, start, end_hdr-start, 
 				     &part->hdr, 0);
 	if (status != PJ_SUCCESS) {
 	    PJ_PERROR(2,(THIS_FILE, status, "Warning: error parsing multipart"
@@ -503,7 +504,8 @@ static pjsip_multipart_part *parse_multipart_part(pj_pool_t *pool,
 }
 
 /* Public function to parse multipart message bodies into its parts */
-PJ_DEF(pjsip_msg_body*) pjsip_multipart_parse(pj_pool_t *pool,
+PJ_DEF(pjsip_msg_body*) pjsip_multipart_parse(int inst_id,
+						  pj_pool_t *pool,
 					      char *buf, pj_size_t len,
 					      const pjsip_media_type *ctype,
 					      unsigned options)
@@ -646,7 +648,7 @@ PJ_DEF(pjsip_msg_body*) pjsip_multipart_parse(pj_pool_t *pool,
 	/* Now that we have determined the part's boundary, parse it
 	 * to get the header and body part of the part.
 	 */
-	part = parse_multipart_part(pool, start_body, end_body - start_body,
+	part = parse_multipart_part(inst_id, pool, start_body, end_body - start_body,
 				    ctype);
 	if (part) {
 	    pjsip_multipart_add_part(pool, body, part);

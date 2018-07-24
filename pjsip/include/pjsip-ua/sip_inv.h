@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_inv.h 3598 2011-06-24 07:35:28Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -319,7 +319,17 @@ enum pjsip_inv_option
      * Session timer extension will always be used even when peer doesn't
      * support/want session timer.
      */
-    PJSIP_INV_ALWAYS_USE_TIMER	= 128
+    PJSIP_INV_ALWAYS_USE_TIMER	= 128,
+
+    /**  
+     * Support SCTP.
+     */
+    PJSIP_INV_TNL_SUPPORT_SCTP	= 256,
+
+    /**  
+     * Require SCTP.
+     */
+    PJSIP_INV_TNL_REQUIRE_SCTP	= 512
 
 };
 
@@ -379,6 +389,7 @@ struct pjsip_inv_session
     pj_int32_t		 last_ack_cseq;		    /**< CSeq of last ACK   */
     void		*mod_data[PJSIP_MAX_MODULE];/**< Modules data.	    */
     struct pjsip_timer	*timer;			    /**< Session Timers.    */
+	int use_sctp;
 };
 
 
@@ -425,10 +436,11 @@ PJ_DECL(pj_status_t) pjsip_inv_usage_init(pjsip_endpoint *endpt,
 
 /**
  * Get the INVITE usage module instance.
- *
+ * 
+ * @param  inst_id The instance id of pjsua.
  * @return		PJ_SUCCESS on success, or the appropriate error code.
  */
-PJ_DECL(pjsip_module*) pjsip_inv_usage_instance(void);
+PJ_DECL(pjsip_module*) pjsip_inv_usage_instance(int inst_id);
 
 
 /**
@@ -587,7 +599,8 @@ PJ_DECL(pj_status_t) pjsip_inv_create_uas(pjsip_dialog *dlg,
  *
  * Note also that this function may terminate the underlying dialog, if
  * there are no other sessions in the dialog.
- *
+ * 
+ * @param inst_id   The instance id of pjsua.
  * @param inv		The invite session.
  * @param st_code	Status code for the reason of the termination.
  * @param notify	If set to non-zero, then on_state_changed() 
@@ -596,8 +609,9 @@ PJ_DECL(pj_status_t) pjsip_inv_create_uas(pjsip_dialog *dlg,
  * @return		PJ_SUCCESS if the INVITE session has been
  *			terminated.
  */
-PJ_DECL(pj_status_t) pjsip_inv_terminate( pjsip_inv_session *inv,
-				          int st_code,
+PJ_DECL(pj_status_t) pjsip_inv_terminate( int inst_id, 
+					  pjsip_inv_session *inv,
+				      int st_code,
 					  pj_bool_t notify );
 
 
@@ -634,6 +648,7 @@ PJ_DECL(pj_status_t) pjsip_inv_uac_restart(pjsip_inv_session *inv,
  * may also be called before this function returns if there is another target
  * to try.
  *
+ * @param inst_id	The instance id of pjsua.
  * @param inv		The invite session.
  * @param cmd		Redirection operation. The semantic of this argument
  *			is similar to the description in the \a on_redirected()
@@ -643,7 +658,8 @@ PJ_DECL(pj_status_t) pjsip_inv_uac_restart(pjsip_inv_session *inv,
  *
  * @return		PJ_SUCCESS on successful operation.
  */
-PJ_DECL(pj_status_t) pjsip_inv_process_redirect(pjsip_inv_session *inv,
+PJ_DECL(pj_status_t) pjsip_inv_process_redirect(int inst_id,
+						pjsip_inv_session *inv,
 						pjsip_redirect_op cmd,
 						pjsip_event *e);
 
@@ -682,6 +698,7 @@ PJ_DECL(pj_status_t) pjsip_inv_initial_answer(	pjsip_inv_session *inv,
  * can only be called for the initial INVITE request, as subsequent
  * re-INVITE request will be answered automatically.
  *
+ * @param inst_id 	The instance id of pjsua.
  * @param inv		The UAS invite session.
  * @param st_code	The st_code contains the status code to be sent, 
  *			which may be a provisional or final response. 
@@ -704,7 +721,8 @@ PJ_DECL(pj_status_t) pjsip_inv_initial_answer(	pjsip_inv_session *inv,
  * @return		PJ_SUCCESS if response message was created
  *			successfully.
  */
-PJ_DECL(pj_status_t) pjsip_inv_answer(	pjsip_inv_session *inv,
+PJ_DECL(pj_status_t) pjsip_inv_answer(	int inst_id,
+					pjsip_inv_session *inv,
 					int st_code,
 					const pj_str_t *st_text,
 					const pjmedia_sdp_session *local_sdp,
@@ -747,6 +765,7 @@ PJ_DECL(pj_status_t) pjsip_inv_set_sdp_answer(pjsip_inv_session *inv,
  * For both UAC and UAS, if the INVITE session has been answered with final
  * response, a BYE request will be created.
  *
+ * @param inst_id	The instance id of pjsua.
  * @param inv		The invite session.
  * @param st_code	Status code to be used for terminating the session.
  * @param st_text	Optional status text.
@@ -756,7 +775,8 @@ PJ_DECL(pj_status_t) pjsip_inv_set_sdp_answer(pjsip_inv_session *inv,
  *
  * @return		PJ_SUCCESS if termination is initiated.
  */
-PJ_DECL(pj_status_t) pjsip_inv_end_session( pjsip_inv_session *inv,
+PJ_DECL(pj_status_t) pjsip_inv_end_session( int inst_id, 
+						pjsip_inv_session *inv,
 					    int st_code,
 					    const pj_str_t *st_text,
 					    pjsip_tx_data **p_tdata );
@@ -766,6 +786,7 @@ PJ_DECL(pj_status_t) pjsip_inv_end_session( pjsip_inv_session *inv,
 /**
  * Create a re-INVITE request. 
  *
+ * @param inst_id   The instance id of pjsua.
  * @param inv		The invite session.
  * @param new_contact	If application wants to update its local contact and
  *			inform peer to perform target refresh with a new 
@@ -785,7 +806,8 @@ PJ_DECL(pj_status_t) pjsip_inv_end_session( pjsip_inv_session *inv,
  *			characteristics (e.g. to contain new offer) can be 
  *			created.
  */
-PJ_DECL(pj_status_t) pjsip_inv_reinvite(pjsip_inv_session *inv,
+PJ_DECL(pj_status_t) pjsip_inv_reinvite(int inst_id,
+					pjsip_inv_session *inv,
 					const pj_str_t *new_contact,
 					const pjmedia_sdp_session *new_offer,
 					pjsip_tx_data **p_tdata );
@@ -795,6 +817,7 @@ PJ_DECL(pj_status_t) pjsip_inv_reinvite(pjsip_inv_session *inv,
 /**
  * Create an UPDATE request to initiate new SDP offer.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param inv		The invite session.
  * @param new_contact	If application wants to update its local contact
  *			and inform peer to perform target refresh with a new
@@ -809,7 +832,8 @@ PJ_DECL(pj_status_t) pjsip_inv_reinvite(pjsip_inv_session *inv,
  *			characteristics (e.g. to contain new offer) can be 
  *			created.
  */
-PJ_DECL(pj_status_t) pjsip_inv_update (	pjsip_inv_session *inv,
+PJ_DECL(pj_status_t) pjsip_inv_update (	int inst_id,
+					pjsip_inv_session *inv,
 					const pj_str_t *new_contact,
 					const pjmedia_sdp_session *offer,
 					pjsip_tx_data **p_tdata );
@@ -844,6 +868,7 @@ PJ_DECL(pj_status_t) pjsip_inv_create_ack(pjsip_inv_session *inv,
 /**
  * Send request or response message in tdata. 
  *
+ * @param inst_id	The instance id of pjsua.
  * @param inv		The invite session.
  * @param tdata		The message to be sent.
  *
@@ -853,7 +878,8 @@ PJ_DECL(pj_status_t) pjsip_inv_create_ack(pjsip_inv_session *inv,
  *			be reported later, in on_tsx_state_changed()
  *			callback.
  */
-PJ_DECL(pj_status_t) pjsip_inv_send_msg(pjsip_inv_session *inv,
+PJ_DECL(pj_status_t) pjsip_inv_send_msg(int inst_id,
+					pjsip_inv_session *inv,
 					pjsip_tx_data *tdata);
 
 

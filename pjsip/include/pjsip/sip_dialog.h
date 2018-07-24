@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_dialog.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -71,8 +71,9 @@ typedef struct pjsip_dlg_party
     pj_str_t		 info_str;  /**< String rep of info header.	*/
     pj_uint32_t		 tag_hval;  /**< Hashed value of the tag.	*/
     pjsip_contact_hdr	*contact;   /**< Contact header.		*/
-    pj_int32_t		 first_cseq;/**< First CSeq seen.		*/
-    pj_int32_t		 cseq;	    /**< Next sequence number.		*/
+	pj_int32_t		 first_cseq;/**< First CSeq seen.		*/
+	pj_int32_t		 cseq;	    /**< Next sequence number.		*/
+	pj_str_t		 ua_str;	    /**< DEAN added, String of User-Agnet.	*/
 } pjsip_dlg_party;
 
 
@@ -171,8 +172,8 @@ struct pjsip_dialog
     pjsip_module       *usage[PJSIP_MAX_MODULE]; /**< Array of usages, 
 					 priority sorted		    */
 
-    /** Module specific data. */
-    void	       *mod_data[PJSIP_MAX_MODULE]; /**< Module data.	    */
+	/** Module specific data. */
+	void	       *mod_data[PJSIP_MAX_MODULE]; /**< Module data.	    */
 };
 
 
@@ -202,6 +203,7 @@ PJ_DECL(pj_bool_t) pjsip_method_creates_dialog(const pjsip_method *m);
  * Note that initially, the session count in the dialog will be initialized 
  * to zero.
  *
+ * @param inst_id       The instance id of pjsua.
  * @param ua		    The user agent module instance.
  * @param local_uri	    Dialog local URI (i.e. From header).
  * @param local_contact	    Optional dialog local Contact to be put as Contact
@@ -224,7 +226,8 @@ PJ_DECL(pj_bool_t) pjsip_method_creates_dialog(const pjsip_method *m);
  *
  * @return		    PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
+PJ_DECL(pj_status_t) pjsip_dlg_create_uac( int inst_id,
+					   pjsip_user_agent *ua,
 					   const pj_str_t *local_uri,
 					   const pj_str_t *local_contact,
 					   const pj_str_t *remote_uri,
@@ -247,6 +250,7 @@ PJ_DECL(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
  * to zero.
  *
  *
+ * @param inst_id       The instance id of pjsua.
  * @param ua		    The user agent module instance.
  * @param rdata		    The incoming request that creates the dialog,
  *			    such as INVITE, SUBSCRIBE, or REFER.
@@ -263,13 +267,16 @@ PJ_DECL(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
  *			    If this argument is NULL, the local contact will be
  *			    initialized from the value of To header in the
  *			    request.
+ * @param ua_version	DEAN Added, User-Agent version
  * @param p_dlg		    Pointer to receive the dialog.
  *
  * @return		    PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pjsip_dlg_create_uas(  pjsip_user_agent *ua,
+PJ_DECL(pj_status_t) pjsip_dlg_create_uas(  int inst_id,
+						pjsip_user_agent *ua,
 					    pjsip_rx_data *rdata,
 					    const pj_str_t *contact,
+						pj_str_t *ua_version,
 					    pjsip_dialog **p_dlg);
 
 

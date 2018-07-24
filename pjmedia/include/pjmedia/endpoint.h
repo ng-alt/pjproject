@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: endpoint.h 3988 2012-03-28 07:32:42Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -60,6 +60,12 @@ typedef enum pjmedia_endpt_flag
 
 
 /**
+ * Type of callback to register to pjmedia_endpt_atexit().
+ */
+typedef void (*pjmedia_endpt_exit_callback)(pjmedia_endpt *endpt);
+
+
+/**
  * Create an instance of media endpoint.
  *
  * @param pf		Pool factory, which will be used by the media endpoint
@@ -70,6 +76,8 @@ typedef enum pjmedia_endpt_flag
  *			endpoint will create an internal ioqueue instance.
  * @param worker_cnt	Specify the number of worker threads to be created
  *			to poll the ioqueue.
+ * @param disable_sdp_compress	disable sdp compress or not.
+ * @param inst_id	The instance id of pjsua.
  * @param p_endpt	Pointer to receive the endpoint instance.
  *
  * @return		PJ_SUCCESS on success.
@@ -77,6 +85,8 @@ typedef enum pjmedia_endpt_flag
 PJ_DECL(pj_status_t) pjmedia_endpt_create( pj_pool_factory *pf,
 					   pj_ioqueue_t *ioqueue,
 					   unsigned worker_cnt,
+					   int disable_sdp_compress,
+					   int inst_id,
 					   pjmedia_endpt **p_endpt);
 
 /**
@@ -143,6 +153,8 @@ PJ_DECL(unsigned) pjmedia_endpt_get_thread_count(pjmedia_endpt *endpt);
 PJ_DECL(pj_thread_t*) pjmedia_endpt_get_thread(pjmedia_endpt *endpt, 
 					       unsigned index);
 
+PJ_DECL(int) pjmedia_endpt_get_inst_id(pjmedia_endpt *endpt);
+
 
 /**
  * Request the media endpoint to create pool.
@@ -193,6 +205,12 @@ PJ_DECL(pj_status_t) pjmedia_endpt_create_sdp( pjmedia_endpt *endpt,
 					       const pjmedia_sock_info sock_info[],
 					       pjmedia_sdp_session **p_sdp );
 
+PJ_DECL(pj_status_t) pjmedia_endpt_create_application_sdp( pjmedia_endpt *endpt,
+														 pj_pool_t *pool,
+														 unsigned stream_cnt,
+														 const pjmedia_sock_info sock_info[],
+														 pjmedia_sdp_session **p_sdp );
+
 
 /**
  * Dump media endpoint capabilities.
@@ -202,6 +220,28 @@ PJ_DECL(pj_status_t) pjmedia_endpt_create_sdp( pjmedia_endpt *endpt,
  * @return		PJ_SUCCESS on success.
  */
 PJ_DECL(pj_status_t) pjmedia_endpt_dump(pjmedia_endpt *endpt);
+
+
+/**
+ * Register cleanup function to be called by media endpoint when 
+ * #pjmedia_endpt_destroy() is called. Note that application should not
+ * use or access any endpoint resource (such as pool, ioqueue) from within
+ * the callback as such resource may have been released when the callback
+ * function is invoked.
+ *
+ * @param endpt		The media endpoint.
+ * @param func		The function to be registered.
+ *
+ * @return		PJ_SUCCESS on success.
+ */
+PJ_DECL(pj_status_t) pjmedia_endpt_atexit(pjmedia_endpt *endpt,
+					  pjmedia_endpt_exit_callback func);
+
+
+PJ_DECL(pjmedia_type) pjmedia_get_meida_type( const pjmedia_sdp_session *sdp, int media_index);
+
+PJ_DECL(pj_pool_t *) pjmedia_get_pool( pjmedia_endpt *endpt);
+
 
 
 PJ_END_DECL

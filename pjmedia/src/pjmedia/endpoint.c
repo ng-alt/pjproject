@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: endpoint.c 3988 2012-03-28 07:32:42Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -23,6 +23,7 @@
 #include <pjmedia-audiodev/audiodev.h>
 #include <pj/assert.h>
 #include <pj/ioqueue.h>
+#include <pj/lock.h>
 #include <pj/log.h>
 #include <pj/os.h>
 #include <pj/pool.h>
@@ -34,10 +35,13 @@
 
 static const pj_str_t STR_AUDIO = { "audio", 5};
 static const pj_str_t STR_VIDEO = { "video", 5};
+static const pj_str_t STR_APPLICATION = { "application", 11};
 static const pj_str_t STR_IN = { "IN", 2 };
 static const pj_str_t STR_IP4 = { "IP4", 3};
 static const pj_str_t STR_IP6 = { "IP6", 3};
 static const pj_str_t STR_RTP_AVP = { "RTP/AVP", 7 };
+static const pj_str_t STR_DTLS_SCTP = { "DTLS/SCTP", 9 };
+static const pj_str_t STR_RTP_SCTP = { "RTP/SCTP", 8 };
 static const pj_str_t STR_SDP_NAME = { "pjmedia", 7 };
 static const pj_str_t STR_SENDRECV = { "sendrecv", 8 };
 
@@ -54,6 +58,14 @@ static int PJ_THREAD_FUNC worker_proc(void*);
 
 
 #define MAX_THREADS	16
+
+
+/* List of media endpoint exit callback. */
+typedef struct exit_cb
+{
+    PJ_DECL_LIST_MEMBER		    (struct exit_cb);
+    pjmedia_endpt_exit_callback	    func;
+} exit_cb;
 
 
 /** Concrete declaration of media endpoint. */
@@ -85,6 +97,14 @@ struct pjmedia_endpt
 
     /** Is telephone-event enable */
     pj_bool_t		  has_telephone_event;
+
+    /** List of exit callback. */
+	exit_cb		  exit_cb_list;
+
+	/*DEAN 0: do bzip2 compress, 1: plain text*/
+	int           disable_sdp_compress;   
+
+	int           inst_id;
 };
 
 /**
@@ -93,6 +113,8 @@ struct pjmedia_endpt
 PJ_DEF(pj_status_t) pjmedia_endpt_create(pj_pool_factory *pf,
 					 pj_ioqueue_t *ioqueue,
 					 unsigned worker_cnt,
+					 int disable_sdp_compress,
+					 int inst_id,
 					 pjmedia_endpt **p_endpt)
 {
     pj_pool_t *pool;
@@ -117,6 +139,9 @@ PJ_DEF(pj_status_t) pjmedia_endpt_create(pj_pool_factory *pf,
     endpt->ioqueue = ioqueue;
     endpt->thread_cnt = worker_cnt;
     endpt->has_telephone_event = PJ_TRUE;
+	/* DEAN Assign disable_sdp_compress*/
+	endpt->disable_sdp_compress = disable_sdp_compress;
+	endpt->inst_id = inst_id;
 
     /* Sound */
     status = pjmedia_aud_subsys_init(pf);
@@ -127,6 +152,9 @@ PJ_DEF(pj_status_t) pjmedia_endpt_create(pj_pool_factory *pf,
     status = pjmedia_codec_mgr_init(&endpt->codec_mgr, endpt->pf);
     if (status != PJ_SUCCESS)
 	goto on_error;
+
+    /* Initialize exit callback list. */
+    pj_list_init(&endpt->exit_cb_list);
 
     /* Create ioqueue if none is specified. */
     if (endpt->ioqueue == NULL) {
@@ -188,6 +216,7 @@ PJ_DEF(pjmedia_codec_mgr*) pjmedia_endpt_get_codec_mgr(pjmedia_endpt *endpt)
  */
 PJ_DEF(pj_status_t) pjmedia_endpt_destroy (pjmedia_endpt *endpt)
 {
+    exit_cb *ecb;
     unsigned i;
 
     PJ_ASSERT_RETURN(endpt, PJ_EINVAL);
@@ -213,6 +242,14 @@ PJ_DEF(pj_status_t) pjmedia_endpt_destroy (pjmedia_endpt *endpt)
 
     pjmedia_codec_mgr_destroy(&endpt->codec_mgr);
     pjmedia_aud_subsys_shutdown();
+
+    /* Call all registered exit callbacks */
+    ecb = endpt->exit_cb_list.next;
+    while (ecb != &endpt->exit_cb_list) {
+	(*ecb->func)(endpt);
+	ecb = ecb->next;
+    }
+
     pj_pool_release (endpt->pool);
 
     return PJ_SUCCESS;
@@ -300,6 +337,15 @@ static int PJ_THREAD_FUNC worker_proc(void *arg)
 }
 
 /**
+ * Get a reference to one of the worker threads of the media endpoint 
+ */
+PJ_DEF(int) pjmedia_endpt_get_inst_id(pjmedia_endpt *endpt)
+{
+    PJ_ASSERT_RETURN(endpt, 0);  // ISNT_TODO
+	return endpt->inst_id;
+}
+
+/**
  * Create pool.
  */
 PJ_DEF(pj_pool_t*) pjmedia_endpt_create_pool( pjmedia_endpt *endpt,
@@ -358,7 +404,7 @@ PJ_DEF(pj_status_t) pjmedia_endpt_create_sdp( pjmedia_endpt *endpt,
 		   pj_sockaddr_print(addr0, tmp_addr, sizeof(tmp_addr), 0));
 
     } else {
-	pj_assert(!"Invalid address family");
+	//pj_assert(!"Invalid address family");
 	return PJ_EAFNOTSUP;
     }
 
@@ -376,6 +422,9 @@ PJ_DEF(pj_status_t) pjmedia_endpt_create_sdp( pjmedia_endpt *endpt,
     /* SDP time and attributes. */
     sdp->time.start = sdp->time.stop = 0;
     sdp->attr_count = 0;
+
+	/* DEAN Assign disable_sdp_compress*/
+	sdp->disable_compress = endpt->disable_sdp_compress;
 
     /* Create media stream 0: */
 
@@ -450,7 +499,7 @@ PJ_DEF(pj_status_t) pjmedia_endpt_create_sdp( pjmedia_endpt *endpt,
 	    rtpmap.param.slen = 1;
 
 	} else {
-	    rtpmap.param.ptr = NULL;
+	    rtpmap.param.ptr = "";
 	    rtpmap.param.slen = 0;
 	}
 
@@ -548,6 +597,109 @@ PJ_DEF(pj_status_t) pjmedia_endpt_create_sdp( pjmedia_endpt *endpt,
 
 }
 
+/**
+ * Create a SDP session description that describes the endpoint
+ * capability.
+ */
+PJ_DEF(pj_status_t) pjmedia_endpt_create_application_sdp( pjmedia_endpt *endpt,
+					      pj_pool_t *pool,
+					      unsigned stream_cnt,
+					      const pjmedia_sock_info sock_info[],
+					      pjmedia_sdp_session **p_sdp )
+{
+    pj_time_val tv;
+    unsigned i;
+    const pj_sockaddr *addr0;
+    pjmedia_sdp_session *sdp;
+    pjmedia_sdp_media *m;
+    pjmedia_sdp_attr *attr;
+
+    /* Sanity check arguments */
+    PJ_ASSERT_RETURN(endpt && pool && p_sdp && stream_cnt, PJ_EINVAL);
+
+    /* Check that there are not too many codecs */
+    PJ_ASSERT_RETURN(endpt->codec_mgr.codec_cnt <= PJMEDIA_MAX_SDP_FMT,
+		     PJ_ETOOMANY);
+
+    /* Create and initialize basic SDP session */
+    sdp = PJ_POOL_ZALLOC_T(pool, pjmedia_sdp_session);
+
+    addr0 = &sock_info[0].rtp_addr_name;
+
+    pj_gettimeofday(&tv);
+    sdp->origin.user = pj_str("-");
+    sdp->origin.version = sdp->origin.id = tv.sec + 2208988800UL;
+    sdp->origin.net_type = STR_IN;
+
+    if (addr0->addr.sa_family == pj_AF_INET()) {
+	sdp->origin.addr_type = STR_IP4;
+	pj_strdup2(pool, &sdp->origin.addr, 
+		   pj_inet_ntoa(addr0->ipv4.sin_addr));
+    } else if (addr0->addr.sa_family == pj_AF_INET6()) {
+	char tmp_addr[PJ_INET6_ADDRSTRLEN];
+
+	sdp->origin.addr_type = STR_IP6;
+	pj_strdup2(pool, &sdp->origin.addr, 
+		   pj_sockaddr_print(addr0, tmp_addr, sizeof(tmp_addr), 0));
+
+    } else {
+	pj_assert(!"Invalid address family");
+	return PJ_EAFNOTSUP;
+    }
+
+    sdp->name = STR_SDP_NAME;
+
+    /* Since we only support one media stream at present, put the
+     * SDP connection line in the session level.
+     */
+    sdp->conn = PJ_POOL_ZALLOC_T(pool, pjmedia_sdp_conn);
+    sdp->conn->net_type = sdp->origin.net_type;
+    sdp->conn->addr_type = sdp->origin.addr_type;
+    sdp->conn->addr = sdp->origin.addr;
+
+
+    /* SDP time and attributes. */
+    sdp->time.start = sdp->time.stop = 0;
+    sdp->attr_count = 0;
+
+	/* DEAN Assign disable_sdp_compress*/
+	sdp->disable_compress = endpt->disable_sdp_compress;
+
+    /* Create media stream 0: */
+
+    sdp->media_count = 1;
+    m = PJ_POOL_ZALLOC_T(pool, pjmedia_sdp_media);
+    sdp->media[0] = m;
+
+    /* Standard media info: */
+    pj_strdup(pool, &m->desc.media, &STR_APPLICATION);
+    m->desc.port = pj_sockaddr_get_port(addr0);
+    m->desc.port_count = 1;
+    pj_strdup (pool, &m->desc.transport, &STR_DTLS_SCTP);
+
+    /* Init media line and attribute list. */
+    m->desc.fmt_count = 0;
+	m->attr_count = 0;
+
+	{
+		/* Create media stream 1: for WebRTC data channel*/
+
+		pj_str_t *fmt;
+
+		fmt = &m->desc.fmt[m->desc.fmt_count++];
+
+		fmt->ptr = (char*) pj_pool_alloc(pool, 8);
+		fmt->slen = pj_utoa(5000, fmt->ptr);
+
+	}
+
+    /* Done */
+    *p_sdp = sdp;
+
+    return PJ_SUCCESS;
+
+}
+
 
 
 #if PJ_LOG_MAX_LEVEL >= 3
@@ -595,9 +747,11 @@ PJ_DEF(pj_status_t) pjmedia_endpt_dump(pjmedia_endpt *endpt)
 
 	switch (codec_info[i].type) {
 	case PJMEDIA_TYPE_AUDIO:
-	    type = "Audio"; break;
+		type = "Audio"; break;
 	case PJMEDIA_TYPE_VIDEO:
-	    type = "Video"; break;
+		type = "Video"; break;
+	case PJMEDIA_TYPE_APPLICATION:
+		type = "Application"; break;
 	default:
 	    type = "Unknown type"; break;
 	}
@@ -627,4 +781,42 @@ PJ_DEF(pj_status_t) pjmedia_endpt_dump(pjmedia_endpt *endpt)
 #endif
 
     return PJ_SUCCESS;
+}
+
+PJ_DEF(pj_status_t) pjmedia_endpt_atexit( pjmedia_endpt *endpt,
+					  pjmedia_endpt_exit_callback func)
+{
+    exit_cb *new_cb;
+
+    PJ_ASSERT_RETURN(endpt && func, PJ_EINVAL);
+
+    if (endpt->quit_flag)
+	return PJ_EINVALIDOP;
+
+    new_cb = PJ_POOL_ZALLOC_T(endpt->pool, exit_cb);
+    new_cb->func = func;
+
+    pj_enter_critical_section(endpt->inst_id);
+    pj_list_push_back(&endpt->exit_cb_list, new_cb);
+    pj_leave_critical_section(endpt->inst_id);
+
+    return PJ_SUCCESS;
+}
+
+PJ_DEF(pjmedia_type) pjmedia_get_meida_type( const pjmedia_sdp_session *sdp, int media_index) {
+	PJ_ASSERT_RETURN(sdp && media_index < sdp->media_count, PJMEDIA_TYPE_UNKNOWN);
+
+	if (pj_stricmp(&sdp->media[media_index]->desc.media, &STR_APPLICATION) == 0) {
+		return PJMEDIA_TYPE_APPLICATION;
+	} else if (pj_stricmp(&sdp->media[media_index]->desc.media, &STR_VIDEO) == 0) {
+		return PJMEDIA_TYPE_VIDEO;
+	} else if (pj_stricmp(&sdp->media[media_index]->desc.media, &STR_AUDIO) == 0) {
+		return PJMEDIA_TYPE_AUDIO;
+	} else {
+		return PJMEDIA_TYPE_UNKNOWN;
+	}
+}
+
+PJ_DEF(pj_pool_t *) pjmedia_get_pool( pjmedia_endpt *endpt) {
+	return endpt->pool;
 }

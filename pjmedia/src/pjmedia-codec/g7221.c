@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: g7221.c 3880 2011-11-02 07:50:44Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -388,7 +388,10 @@ PJ_DEF(pj_status_t) pjmedia_codec_g7221_set_mode(unsigned sample_rate,
      * can disable it.
      */
     if (!enabled)
-	return PJ_ENOTFOUND;
+	{
+		PJ_LOG(4, ("g7221.c", "pjmedia_codec_g7221_set_mode() mod not found."));
+		return PJ_ENOTFOUND;
+	}
 
     /* Initialize a non-standard mode, look for available space. */
     for (i = codec_factory.mode_rsv_start; 

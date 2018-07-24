@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: xml.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -105,7 +105,7 @@ static int xml_parse_print_test(const char *doc)
 
     pool = pj_pool_create(mem, "xml", 4096, 1024, NULL);
     pj_strdup2(pool, &msg, doc);
-    root = pj_xml_parse(pool, msg.ptr, msg.slen);
+    root = pj_xml_parse(0, pool, msg.ptr, msg.slen);
     if (!root) {
 	PJ_LOG(1, (THIS_FILE, "  Error: unable to parse XML"));
 	return -10;

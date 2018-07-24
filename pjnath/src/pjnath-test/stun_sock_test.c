@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_sock_test.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -829,7 +829,7 @@ int stun_sock_test(void)
 	goto on_return;
     }
     
-    pj_stun_config_init(&stun_cfg, mem, 0, ioqueue, timer_heap);
+    pj_stun_config_init(0, &stun_cfg, mem, 0, ioqueue, timer_heap);
 
     DO_TEST(timeout_test(&stun_cfg, PJ_FALSE));
     DO_TEST(timeout_test(&stun_cfg, PJ_TRUE));

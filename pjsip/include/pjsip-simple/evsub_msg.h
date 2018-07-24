@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: evsub_msg.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -105,7 +105,7 @@ PJ_DECL(pjsip_sub_state_hdr*) pjsip_sub_state_hdr_create(pj_pool_t *pool);
 /**
  * Initialize parser for event notify module.
  */
-PJ_DECL(void) pjsip_evsub_init_parser(void);
+PJ_DECL(void) pjsip_evsub_init_parser(int inst_id);
 
 
 PJ_END_DECL

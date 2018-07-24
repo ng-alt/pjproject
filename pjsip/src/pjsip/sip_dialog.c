@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_dialog.c 4385 2013-02-27 10:11:59Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -38,7 +38,7 @@
 
 #define THIS_FILE	"sip_dialog.c"
 
-long pjsip_dlg_lock_tls_id;
+long pjsip_dlg_lock_tls_id[PJSUA_MAX_INSTANCES];
 
 /* Config */
 pj_bool_t pjsip_include_allow_hdr_in_dlg = PJSIP_INCLUDE_ALLOW_HDR_IN_DLG;
@@ -61,7 +61,8 @@ PJ_DEF(pj_bool_t) pjsip_method_creates_dialog(const pjsip_method *m)
 	   (pjsip_method_cmp(m, &update)==0);
 }
 
-static pj_status_t create_dialog( pjsip_user_agent *ua,
+static pj_status_t create_dialog( int inst_id,
+				  pjsip_user_agent *ua,
 				  pjsip_dialog **p_dlg)
 {
     pjsip_endpoint *endpt;
@@ -69,7 +70,7 @@ static pj_status_t create_dialog( pjsip_user_agent *ua,
     pjsip_dialog *dlg;
     pj_status_t status;
 
-    endpt = pjsip_ua_get_endpt(ua);
+    endpt = pjsip_ua_get_endpt(inst_id, ua);
     if (!endpt)
 	return PJ_EINVALIDOP;
 
@@ -125,7 +126,8 @@ static void destroy_dialog( pjsip_dialog *dlg )
 /*
  * Create an UAC dialog.
  */
-PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
+PJ_DEF(pj_status_t) pjsip_dlg_create_uac( int inst_id,
+					  pjsip_user_agent *ua,
 					  const pj_str_t *local_uri,
 					  const pj_str_t *local_contact,
 					  const pj_str_t *remote_uri,
@@ -140,13 +142,13 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
     PJ_ASSERT_RETURN(ua && local_uri && remote_uri && p_dlg, PJ_EINVAL);
 
     /* Create dialog instance. */
-    status = create_dialog(ua, &dlg);
+    status = create_dialog(inst_id, ua, &dlg);
     if (status != PJ_SUCCESS)
 	return status;
 
     /* Parse target. */
     pj_strdup_with_null(dlg->pool, &tmp, target ? target : remote_uri);
-    dlg->target = pjsip_parse_uri(dlg->pool, tmp.ptr, tmp.slen, 0);
+    dlg->target = pjsip_parse_uri(inst_id, dlg->pool, tmp.ptr, tmp.slen, 0);
     if (!dlg->target) {
 	status = PJSIP_EINVALIDURI;
 	goto on_error;
@@ -168,7 +170,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
 	    param->value.ptr[param->value.slen] = '\0';
 
 	    hdr = (pjsip_hdr*)
-	    	  pjsip_parse_hdr(dlg->pool, &param->name, param->value.ptr,
+	    	  pjsip_parse_hdr(inst_id, dlg->pool, &param->name, param->value.ptr,
 				  param->value.slen, NULL);
 
 	    param->value.ptr[param->value.slen] = (char)c;
@@ -194,7 +196,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
     /* Init local info. */
     dlg->local.info = pjsip_from_hdr_create(dlg->pool);
     pj_strdup_with_null(dlg->pool, &dlg->local.info_str, local_uri);
-    dlg->local.info->uri = pjsip_parse_uri(dlg->pool, 
+    dlg->local.info->uri = pjsip_parse_uri(inst_id, dlg->pool, 
 					   dlg->local.info_str.ptr, 
 					   dlg->local.info_str.slen, 0);
     if (!dlg->local.info->uri) {
@@ -206,8 +208,8 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
     pj_create_unique_string(dlg->pool, &dlg->local.info->tag);
 
     /* Calculate hash value of local tag. */
-    dlg->local.tag_hval = pj_hash_calc(0, dlg->local.info->tag.ptr,
-				       dlg->local.info->tag.slen);
+    dlg->local.tag_hval = pj_hash_calc_tolower(0, NULL,
+                                               &dlg->local.info->tag);
 
     /* Randomize local CSeq. */
     dlg->local.first_cseq = pj_rand() & 0x7FFF;
@@ -217,7 +219,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
     pj_strdup_with_null(dlg->pool, &tmp, 
 			local_contact ? local_contact : local_uri);
     dlg->local.contact = (pjsip_contact_hdr*)
-			 pjsip_parse_hdr(dlg->pool, &HCONTACT, tmp.ptr, 
+			 pjsip_parse_hdr(inst_id, dlg->pool, &HCONTACT, tmp.ptr, 
 					 tmp.slen, NULL);
     if (!dlg->local.contact) {
 	status = PJSIP_EINVALIDURI;
@@ -227,7 +229,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uac( pjsip_user_agent *ua,
     /* Init remote info. */
     dlg->remote.info = pjsip_to_hdr_create(dlg->pool);
     pj_strdup_with_null(dlg->pool, &dlg->remote.info_str, remote_uri);
-    dlg->remote.info->uri = pjsip_parse_uri(dlg->pool, 
+    dlg->remote.info->uri = pjsip_parse_uri(inst_id, dlg->pool, 
 					    dlg->remote.info_str.ptr, 
 					    dlg->remote.info_str.slen, 0);
     if (!dlg->remote.info->uri) {
@@ -310,9 +312,11 @@ on_error:
 /*
  * Create UAS dialog.
  */
-PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
+PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   int inst_id,
+						pjsip_user_agent *ua,
 					    pjsip_rx_data *rdata,
-					    const pj_str_t *contact,
+						const pj_str_t *contact,
+						pj_str_t *ua_version,
 					    pjsip_dialog **p_dlg)
 {
     pj_status_t status;
@@ -343,7 +347,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
 	PJ_EINVALIDOP);
 
     /* Create dialog instance. */
-    status = create_dialog(ua, &dlg);
+    status = create_dialog(inst_id, ua, &dlg);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -374,8 +378,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
     pj_strdup(dlg->pool, &dlg->local.info_str, &tmp);
 
     /* Calculate hash value of local tag. */
-    dlg->local.tag_hval = pj_hash_calc(0, dlg->local.info->tag.ptr,
-				       dlg->local.info->tag.slen);
+    dlg->local.tag_hval = pj_hash_calc_tolower(0, NULL, &dlg->local.info->tag);
 
 
     /* Randomize local cseq */
@@ -396,7 +399,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
 
 	pj_strdup_with_null(dlg->pool, &tmp, contact);
 	dlg->local.contact = (pjsip_contact_hdr*)
-			     pjsip_parse_hdr(dlg->pool, &HCONTACT, tmp.ptr, 
+			     pjsip_parse_hdr(inst_id, dlg->pool, &HCONTACT, tmp.ptr, 
 					     tmp.slen, NULL);
 	if (!dlg->local.contact) {
 	    status = PJSIP_EINVALIDURI;
@@ -407,6 +410,9 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
 	dlg->local.contact = pjsip_contact_hdr_create(dlg->pool);
 	dlg->local.contact->uri = dlg->local.info->uri;
     }
+	
+	if (ua_version) 
+		pj_strdup_with_null(dlg->pool, &dlg->local.ua_str, ua_version);
 
     /* Init remote info from the From header. */
     dlg->remote.info = (pjsip_fromto_hdr*) 
@@ -456,7 +462,12 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
     			  pjsip_hdr_clone(dlg->pool, (pjsip_hdr*)contact_hdr);
 
     /* Init remote's CSeq from CSeq header */
-    dlg->remote.cseq = dlg->remote.first_cseq = rdata->msg_info.cseq->cseq;
+	dlg->remote.cseq = dlg->remote.first_cseq = rdata->msg_info.cseq->cseq;
+
+	/* DEAN Added, Update User-Agent*/
+	if (rdata->msg_info.user_agent &&
+		rdata->msg_info.user_agent->user_agent.slen > 0)
+		pj_strdup_with_null(dlg->pool, &dlg->remote.ua_str, &rdata->msg_info.user_agent->user_agent);
 
     /* Set initial target to remote's Contact. */
     dlg->target = dlg->remote.contact->uri;
@@ -522,8 +533,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_uas(   pjsip_user_agent *ua,
     ++dlg->tsx_count;
 
     /* Calculate hash value of remote tag. */
-    dlg->remote.tag_hval = pj_hash_calc(0, dlg->remote.info->tag.ptr, 
-					dlg->remote.info->tag.slen);
+    dlg->remote.tag_hval = pj_hash_calc_tolower(0, NULL, &dlg->remote.info->tag);
 
     /* Update remote capabilities info */
     pjsip_dlg_update_remote_cap(dlg, rdata->msg_info.msg, PJ_TRUE);
@@ -599,8 +609,12 @@ PJ_DEF(pj_status_t) pjsip_dlg_fork( const pjsip_dialog *first_dlg,
     const pjsip_contact_hdr *contact;
     pj_status_t status;
 
+	int inst_id;
+
     /* Check arguments. */
     PJ_ASSERT_RETURN(first_dlg && rdata && new_dlg, PJ_EINVAL);
+
+	inst_id = rdata->tp_info.pool->factory->inst_id;
     
     /* rdata must be response message. */
     PJ_ASSERT_RETURN(msg->type == PJSIP_RESPONSE_MSG,
@@ -621,7 +635,7 @@ PJ_DEF(pj_status_t) pjsip_dlg_fork( const pjsip_dialog *first_dlg,
 	return PJSIP_EMISSINGHDR;
 
     /* Create the dialog. */
-    status = create_dialog((pjsip_user_agent*)first_dlg->ua, &dlg);
+    status = create_dialog(inst_id, (pjsip_user_agent*)first_dlg->ua, &dlg);
     if (status != PJ_SUCCESS)
 	return status;
 
@@ -1097,7 +1111,10 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_request( pjsip_dialog *dlg,
     pjsip_tx_data *tdata = NULL;
     PJ_USE_EXCEPTION;
 
+	int inst_id;
     PJ_ASSERT_RETURN(dlg && method && p_tdata, PJ_EINVAL);
+
+	inst_id = dlg->pool->factory->inst_id;
 
     /* Lock dialog. */
     pjsip_dlg_inc_lock(dlg);
@@ -1110,13 +1127,13 @@ PJ_DEF(pj_status_t) pjsip_dlg_create_request( pjsip_dialog *dlg,
     status = PJ_EBUG;
 
     /* Create the request. */
-    PJ_TRY {
+    PJ_TRY(inst_id) {
 	status = dlg_create_request_throw(dlg, method, cseq, &tdata);
     }
     PJ_CATCH_ANY {
 	status = PJ_ENOMEM;
     }
-    PJ_END;
+    PJ_END(inst_id);
 
     /* Failed! Delete transmit data. */
     if (status != PJ_SUCCESS && tdata) {
@@ -1145,10 +1162,14 @@ PJ_DEF(pj_status_t) pjsip_dlg_send_request( pjsip_dialog *dlg,
     pjsip_msg *msg = tdata->msg;
     pj_status_t status;
 
+	int inst_id;
+
     /* Check arguments. */
     PJ_ASSERT_RETURN(dlg && tdata && tdata->msg, PJ_EINVAL);
     PJ_ASSERT_RETURN(tdata->msg->type == PJSIP_REQUEST_MSG,
 		     PJSIP_ENOTREQUESTMSG);
+
+	inst_id = dlg->pool->factory->inst_id;
 
     PJ_LOG(5,(dlg->obj_name, "Sending %s",
 	      pjsip_tx_data_get_info(tdata)));
@@ -1177,57 +1198,57 @@ PJ_DEF(pj_status_t) pjsip_dlg_send_request( pjsip_dialog *dlg,
      * The transaction user is the user agent module.
      */
     if (msg->line.req.method.id != PJSIP_ACK_METHOD) {
-	int tsx_count;
+        int tsx_count;
 
-	status = pjsip_tsx_create_uac(dlg->ua, tdata, &tsx);
-	if (status != PJ_SUCCESS)
-	    goto on_error;
+        status = pjsip_tsx_create_uac(inst_id, dlg->ua, tdata, &tsx);
+        if (status != PJ_SUCCESS)
+            goto on_error;
 
-	/* Set transport selector */
-	status = pjsip_tsx_set_transport(tsx, &dlg->tp_sel);
-	pj_assert(status == PJ_SUCCESS);
+	    /* Set transport selector */
+	    status = pjsip_tsx_set_transport(tsx, &dlg->tp_sel);
+        pj_assert(status == PJ_SUCCESS);
 
-	/* Attach this dialog to the transaction, so that user agent
-	 * will dispatch events to this dialog.
-	 */
-	tsx->mod_data[dlg->ua->id] = dlg;
+	    /* Attach this dialog to the transaction, so that user agent
+	    * will dispatch events to this dialog.
+	    */
+	    tsx->mod_data[dlg->ua->id] = dlg;
 
-	/* Copy optional caller's mod_data, if present */
-	if (mod_data_id >= 0 && mod_data_id < PJSIP_MAX_MODULE)
-	    tsx->mod_data[mod_data_id] = mod_data;
+	    /* Copy optional caller's mod_data, if present */
+	    if (mod_data_id >= 0 && mod_data_id < PJSIP_MAX_MODULE)
+            tsx->mod_data[mod_data_id] = mod_data;
+        
+        /* Increment transaction counter. */
+        tsx_count = ++dlg->tsx_count;
 
-	/* Increment transaction counter. */
-	tsx_count = ++dlg->tsx_count;
-
-	/* Send the message. */
-	status = pjsip_tsx_send_msg(tsx, tdata);
-	if (status != PJ_SUCCESS) {
-	    if (dlg->tsx_count == tsx_count)
-		pjsip_tsx_terminate(tsx, tsx->status_code);
-	    goto on_error;
-	}
+	    /* Send the message. */
+	    status = pjsip_tsx_send_msg(tsx, tdata);
+	        if (status != PJ_SUCCESS) {
+                if (dlg->tsx_count == tsx_count)
+                    pjsip_tsx_terminate(tsx, tsx->status_code);
+                goto on_error;
+            }
 
     } else {
-	/* Set transport selector */
-	pjsip_tx_data_set_transport(tdata, &dlg->tp_sel);
+                /* Set transport selector */
+        pjsip_tx_data_set_transport(tdata, &dlg->tp_sel);
 
-	/* Send request */
-	status = pjsip_endpt_send_request_stateless(dlg->endpt, tdata, 
+                /* Send request */
+        status = pjsip_endpt_send_request_stateless(dlg->endpt, tdata, 
 						    NULL, NULL);
-	if (status != PJ_SUCCESS)
-	    goto on_error;
+        if (status != PJ_SUCCESS)
+        goto on_error;
 
     }
 
-    /* Unlock dialog, may destroy dialog. */
-    pjsip_dlg_dec_lock(dlg);
-
-    return PJ_SUCCESS;
+        /* Unlock dialog, may destroy dialog. */
+        pjsip_dlg_dec_lock(dlg);
+        
+        return PJ_SUCCESS;
 
 on_error:
     /* Unlock dialog, may destroy dialog. */
     pjsip_dlg_dec_lock(dlg);
-   
+
     /* Whatever happen delete the message. */
     pjsip_tx_data_dec_ref( tdata );
 
@@ -1289,6 +1310,18 @@ static void dlg_beautify_response(pjsip_dialog *dlg,
 		hdr = (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, c_hdr);
 		pjsip_msg_add_hdr(tdata->msg, hdr);
 	    }
+	}
+
+	/* Add Tnl-Supported header in 2xx response. */
+	if (st_class==2 && 
+		pjsip_msg_find_hdr(tdata->msg, PJSIP_H_TNL_SUPPORTED, NULL)==NULL) 
+	{
+		c_hdr = pjsip_endpt_get_capability(dlg->endpt,
+			PJSIP_H_TNL_SUPPORTED, NULL);
+		if (c_hdr) {
+			hdr = (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, c_hdr);
+			pjsip_msg_add_hdr(tdata->msg, hdr);
+		}
 	}
 
     }
@@ -1487,15 +1520,27 @@ PJ_DEF(pj_status_t) pjsip_dlg_respond(  pjsip_dialog *dlg,
 
     /* Add additional header, if any */
     if (hdr_list) {
-	const pjsip_hdr *hdr;
+		const pjsip_hdr *hdr;
 
-	hdr = hdr_list->next;
-	while (hdr != hdr_list) {
-	    pjsip_msg_add_hdr(tdata->msg,
-			      (pjsip_hdr*)pjsip_hdr_clone(tdata->pool, hdr));
-	    hdr = hdr->next;
+		hdr = hdr_list->next;
+		while (hdr != hdr_list) {
+			pjsip_msg_add_hdr(tdata->msg,
+					  (pjsip_hdr*)pjsip_hdr_clone(tdata->pool, hdr));
+			hdr = hdr->next;
+		}
 	}
-    }
+
+	// DEAN Added 2013-03-15, Add User-Agent info
+	{
+		const pj_str_t STR_USER_AGENT = { "User-Agent", 10 };
+		pjsip_hdr *h;
+		h = (pjsip_hdr*)pjsip_generic_string_hdr_create(tdata->pool, 
+			&STR_USER_AGENT, 
+			&dlg->local.ua_str);
+
+		pjsip_msg_add_hdr(tdata->msg,
+			(pjsip_hdr*)pjsip_hdr_clone(tdata->pool, h));
+	}
 
     /* Add the message body, if any. */
     if (body) {
@@ -1744,7 +1789,12 @@ void pjsip_dlg_on_rx_response( pjsip_dialog *dlg, pjsip_rx_data *rdata )
     pjsip_dlg_inc_lock(dlg);
 
     /* Check that rdata already has dialog in mod_data. */
-    pj_assert(pjsip_rdata_get_dlg(rdata) == dlg);
+	pj_assert(pjsip_rdata_get_dlg(rdata) == dlg);
+
+	/* DEAN Added, Update User-Agent*/
+	if (rdata->msg_info.user_agent &&
+		rdata->msg_info.user_agent->user_agent.slen > 0)
+		pj_strdup_with_null(dlg->pool, &dlg->remote.ua_str, &rdata->msg_info.user_agent->user_agent);
 
     /* Keep the response's status code */
     res_code = rdata->msg_info.msg->line.status.code;
@@ -1776,7 +1826,7 @@ void pjsip_dlg_on_rx_response( pjsip_dialog *dlg, pjsip_rx_data *rdata )
 	 res_code > 100 &&
 	 res_code/100 <= 2 &&
 	 pjsip_method_creates_dialog(&rdata->msg_info.cseq->method) &&
-	 pj_strcmp(&dlg->remote.info->tag, &rdata->msg_info.to->tag)))
+	 pj_stricmp(&dlg->remote.info->tag, &rdata->msg_info.to->tag)))
     {
 	pjsip_contact_hdr *contact;
 
@@ -1785,7 +1835,7 @@ void pjsip_dlg_on_rx_response( pjsip_dialog *dlg, pjsip_rx_data *rdata )
 	 * with To-tag or forking, apply strict update.
 	 */
 	pjsip_dlg_update_remote_cap(dlg, rdata->msg_info.msg,
-				    pj_strcmp(&dlg->remote.info->tag,
+				    pj_stricmp(&dlg->remote.info->tag,
 					      &rdata->msg_info.to->tag));
 
 	/* Update To tag. */
@@ -1871,6 +1921,15 @@ void pjsip_dlg_on_rx_response( pjsip_dialog *dlg, pjsip_rx_data *rdata )
 	}
 
 	dlg_update_routeset(dlg, rdata);
+
+	/* Update remote capability info after the first 2xx response
+	 * (ticket #1539). Note that the remote capability retrieved here
+	 * will be assumed to remain unchanged for the duration of the dialog.
+	 */
+	if (dlg->role==PJSIP_ROLE_UAC && !dlg->uac_has_2xx) {
+	    pjsip_dlg_update_remote_cap(dlg, rdata->msg_info.msg, PJ_FALSE);
+	    dlg->uac_has_2xx = PJ_TRUE;
+	}
     }
 
     /* Pass to dialog usages. */
@@ -1944,7 +2003,7 @@ void pjsip_dlg_on_tsx_state( pjsip_dialog *dlg,
 
     PJ_LOG(5,(dlg->obj_name, "Transaction %s state changed to %s",
 	      tsx->obj_name, pjsip_tsx_state_str(tsx->state)));
-
+    
     /* Lock the dialog and increment session. */
     pjsip_dlg_inc_lock(dlg);
 
@@ -2187,8 +2246,9 @@ PJ_DEF(pj_status_t) pjsip_dlg_remove_remote_cap_hdr(pjsip_dialog *dlg,
     hdr = (pjsip_generic_array_hdr*)
 	  pjsip_dlg_get_remote_cap_hdr(dlg, htype, hname);
     if (!hdr) {
-	pjsip_dlg_dec_lock(dlg);
-	return PJ_ENOTFOUND;
+		pjsip_dlg_dec_lock(dlg);
+		PJ_LOG(4, ("sip_dialog.c", "pjsip_dlg_remove_remote_cap_hdr() cap_hdr not found."));
+		return PJ_ENOTFOUND;
     }
 
     pj_list_erase(hdr);

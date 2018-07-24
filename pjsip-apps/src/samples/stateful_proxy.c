@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stateful_proxy.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -171,7 +171,7 @@ static pj_bool_t proxy_on_rx_request( pjsip_rx_data *rdata )
 	 * Set our module as the transaction user to receive further
 	 * events from this transaction.
 	 */
-	status = pjsip_tsx_create_uac(&mod_tu, tdata, &uac_tsx);
+	status = pjsip_tsx_create_uac(0, &mod_tu, tdata, &uac_tsx);
 	if (status != PJ_SUCCESS) {
 	    pjsip_tx_data_dec_ref(tdata);
 	    pjsip_endpt_respond_stateless(global.endpt, rdata, 
@@ -253,7 +253,7 @@ static pj_bool_t proxy_on_rx_request( pjsip_rx_data *rdata )
 	/* Find the UAS INVITE transaction */
 	pjsip_tsx_create_key(rdata->tp_info.pool, &key, PJSIP_UAS_ROLE,
 			     pjsip_get_invite_method(), rdata);
-	invite_uas = pjsip_tsx_layer_find_tsx(&key, PJ_TRUE);
+	invite_uas = pjsip_tsx_layer_find_tsx(0, &key, PJ_TRUE);
 	if (!invite_uas) {
 	    /* Invite transaction not found, respond CANCEL with 481 */
 	    pjsip_endpt_respond_stateless(global.endpt, rdata, 481, NULL,
@@ -513,7 +513,7 @@ int main(int argc, char *argv[])
     global.port = 5060;
     global.record_route = 0;
 
-    pj_log_set_level(4);
+    pj_log_set_level(0, 4);
 
     status = init_options(argc, argv);
     if (status != PJ_SUCCESS)
@@ -566,7 +566,7 @@ int main(int argc, char *argv[])
 	} else if (line[0] == 'd') {
 	    pj_bool_t detail = (line[1] == 'd');
 	    pjsip_endpt_dump(global.endpt, detail);
-	    pjsip_tsx_layer_dump(detail);
+	    pjsip_tsx_layer_dump(0, detail);
 	}
     }
 

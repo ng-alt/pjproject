@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: xpidf.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -60,13 +60,14 @@ PJ_DECL(pjxpidf_pres*) pjxpidf_create(pj_pool_t *pool, const pj_str_t *uri);
 /**
  * Parse XPIDF document.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool	    Pool.
  * @param text	    Input text.
  * @param len	    Length of input text.
  *
  * @return	    XPIDF document.
  */
-PJ_DECL(pjxpidf_pres*) pjxpidf_parse(pj_pool_t *pool, char *text, pj_size_t len);
+PJ_DECL(pjxpidf_pres*) pjxpidf_parse(int inst_id, pj_pool_t *pool, char *text, pj_size_t len);
 
 
 /**

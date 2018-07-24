@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_auth_parser.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -37,9 +37,10 @@ PJ_BEGIN_DECL
  *
  * This function is called automatically by the main SIP parser.
  *
+ * @param inst_id  The instance id of pjsua.
  * @return      PJ_SUCCESS or the appropriate status code.
  */
-PJ_DECL(pj_status_t) pjsip_auth_init_parser(void);
+PJ_DECL(pj_status_t) pjsip_auth_init_parser(int inst_id);
 
 /**
  * DeInitialize authorization parser module.

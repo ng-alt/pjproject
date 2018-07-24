@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: errno.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -175,6 +175,11 @@ PJ_DECL(pj_str_t) pj_strerror( pj_status_t statcode,
  */
 #define PJ_PERROR(level,arg)	do { \
 				    pj_perror_wrapper_##level(arg); \
+				} while (0)
+
+#define PJ_PERROR_GOTO(level, lebel, arg)	do { \
+				    pj_perror_wrapper_##level(arg); \
+					goto lebel; \
 				} while (0)
 
 /**
@@ -422,6 +427,11 @@ PJ_DECL(pj_status_t) pj_register_strerror(pj_status_t start_code,
  * Unsupported address family
  */
 #define PJ_EAFNOTSUP	    (PJ_ERRNO_START_STATUS + 22)/* 70022 */
+/**
+ * @hideinitializer
+ * Object no longer exists
+ */
+#define PJ_EGONE	    (PJ_ERRNO_START_STATUS + 23)/* 70023 */
 
 /** @} */   /* pj_errnum */
 

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stateless_proxy.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -179,7 +179,7 @@ int main(int argc, char *argv[])
     pj_status_t status;
 
     global.port = 5060;
-    pj_log_set_level(4);
+    pj_log_set_level(0, 4);
 
     status = init_options(argc, argv);
     if (status != PJ_SUCCESS)

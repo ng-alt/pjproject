@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: dns_server.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -190,8 +190,10 @@ PJ_DEF(pj_status_t) pj_dns_server_del_rec( pj_dns_server *srv,
     PJ_ASSERT_RETURN(srv && type && name, PJ_EINVAL);
 
     rr = find_rr(srv, dns_class, type, name);
-    if (!rr)
-	return PJ_ENOTFOUND;
+	if (!rr) {
+		PJ_LOG(4, ("dns_server.c", "pj_dns_server_del_rec() dns server not found."));
+		return PJ_ENOTFOUND;
+	}
 
     pj_list_erase(rr);
 

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: alsa_dev.c 4387 2013-02-27 10:16:08Z ming $ */
 /*
  * Copyright (C) 2009-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2007-2009 Keystream AB and Konftel AB, All rights reserved.
@@ -232,7 +232,7 @@ static pj_status_t add_dev (struct alsa_factory *af, const char *dev_name)
     pj_bzero(adi, sizeof(*adi));
 
     /* Set device name */
-    strcpy(adi->name, dev_name);
+    strncpy(adi->name, dev_name, sizeof(adi->name));
 
     /* Check the number of playback channels */
     adi->output_count = (pb_result>=0) ? 1 : 0;
@@ -547,6 +547,7 @@ static pj_status_t open_playback (struct alsa_stream* stream,
     int result;
     unsigned int rate;
     snd_pcm_uframes_t tmp_buf_size;
+    snd_pcm_uframes_t tmp_period_size;
 
     if (param->play_id < 0 || param->play_id >= stream->af->dev_cnt)
 	return PJMEDIA_EAUD_INVDEV;
@@ -613,10 +614,11 @@ static pj_status_t open_playback (struct alsa_stream* stream,
 					    param->channel_count;
     TRACE_((THIS_FILE, "open_playback: set period size: %d",
 	    stream->pb_frames));
+    tmp_period_size = stream->pb_frames;
     snd_pcm_hw_params_set_period_size_near (stream->pb_pcm, params,
-					    &stream->pb_frames, NULL);
+					    &tmp_period_size, NULL);
     TRACE_((THIS_FILE, "open_playback: period size set to: %d",
-	    stream->pb_frames));
+	    tmp_period_size));
 
     /* Set the sound device buffer size and latency */
     if (param->flags & PJMEDIA_AUD_DEV_CAP_OUTPUT_LATENCY)
@@ -663,6 +665,7 @@ static pj_status_t open_capture (struct alsa_stream* stream,
     int result;
     unsigned int rate;
     snd_pcm_uframes_t tmp_buf_size;
+    snd_pcm_uframes_t tmp_period_size;
 
     if (param->rec_id < 0 || param->rec_id >= stream->af->dev_cnt)
 	return PJMEDIA_EAUD_INVDEV;
@@ -729,10 +732,11 @@ static pj_status_t open_capture (struct alsa_stream* stream,
 					    param->channel_count;
     TRACE_((THIS_FILE, "open_capture: set period size: %d",
 	    stream->ca_frames));
+    tmp_period_size = stream->ca_frames;
     snd_pcm_hw_params_set_period_size_near (stream->ca_pcm, params,
-					    &stream->ca_frames, NULL);
+					    &tmp_period_size, NULL);
     TRACE_((THIS_FILE, "open_capture: period size set to: %d",
-	    stream->ca_frames));
+	    tmp_period_size));
 
     /* Set the sound device buffer size and latency */
     if (param->flags & PJMEDIA_AUD_DEV_CAP_INPUT_LATENCY)

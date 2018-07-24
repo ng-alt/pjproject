@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sip_ua_layer.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -75,9 +75,10 @@ PJ_DECL(pj_status_t) pjsip_ua_init_module(pjsip_endpoint *endpt,
 /**
  * Get the instance of the user agent.
  *
+ * @param  inst_id The instance id of pjsua.
  * @return		The user agent module instance.
  */
-PJ_DECL(pjsip_user_agent*) pjsip_ua_instance(void);
+PJ_DECL(pjsip_user_agent*) pjsip_ua_instance(int inst_id);
 
 
 /**
@@ -88,9 +89,10 @@ PJ_DECL(pjsip_user_agent*) pjsip_ua_instance(void);
  * no forking occurs, the number of dialog sets will be equal to
  * the number of dialogs.
  *
+ * @param  inst_id The instance id of pjsua.
  * @return	    Number of dialog sets.
  */
-PJ_DECL(pj_uint32_t) pjsip_ua_get_dlg_set_count(void);
+PJ_DECL(pj_uint32_t) pjsip_ua_get_dlg_set_count(int inst_id);
 
 
 /**
@@ -98,6 +100,7 @@ PJ_DECL(pj_uint32_t) pjsip_ua_get_dlg_set_count(void);
  * function may optionally lock the matching dialog instance before
  * returning it back to the caller.
  *
+ * @param inst_id	The instance id of pjsua.
  * @param call_id	The call ID to be matched.
  * @param local_tag	The local tag to be matched.
  * @param remote_tag	The remote tag to be matched.
@@ -110,7 +113,8 @@ PJ_DECL(pj_uint32_t) pjsip_ua_get_dlg_set_count(void);
  * @return		The matching dialog instance, or NULL if no matching
  *			dialog is found.
  */
-PJ_DECL(pjsip_dialog*) pjsip_ua_find_dialog(const pj_str_t *call_id,
+PJ_DECL(pjsip_dialog*) pjsip_ua_find_dialog(const int inst_id,
+						const pj_str_t *call_id,
 					    const pj_str_t *local_tag,
 					    const pj_str_t *remote_tag,
 					    pj_bool_t lock_dialog);
@@ -118,26 +122,29 @@ PJ_DECL(pjsip_dialog*) pjsip_ua_find_dialog(const pj_str_t *call_id,
 /**
  * Destroy the user agent layer.
  *
+ * @param  inst_id The instance id of pjsua.
  * @return		PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pjsip_ua_destroy(void);
+PJ_DECL(pj_status_t) pjsip_ua_destroy(int inst_id);
 
 /**
  * Dump user agent contents (e.g. all dialogs).
  *
+ * @param inst_id   The instance id of pjsua.
  * @param detail	If non-zero, list of dialogs will be printed.
  */
-PJ_DECL(void) pjsip_ua_dump(pj_bool_t detail);
+PJ_DECL(void) pjsip_ua_dump(int inst_id, pj_bool_t detail);
 
 /**
  * Get the endpoint instance of a user agent module.
  *
+ * @param  inst_id  The instance id of pjsua.
  * @param ua		The user agent instance.
  *
  * @return		The endpoint instance where the user agent is
  *			registered.
  */
-PJ_DECL(pjsip_endpoint*) pjsip_ua_get_endpt(pjsip_user_agent *ua);
+PJ_DECL(pjsip_endpoint*) pjsip_ua_get_endpt(int inst_id, pjsip_user_agent *ua);
 
 
 /**

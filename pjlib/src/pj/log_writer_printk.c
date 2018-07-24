@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: log_writer_printk.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -22,7 +22,7 @@
 
 PJ_DEF(void) pj_log_write(int level, const char *buffer, int len)
 {
-    PJ_CHECK_STACK();
+    PJ_CHECK_STACK();	
     printk(KERN_INFO "%s", buffer);
 }
 

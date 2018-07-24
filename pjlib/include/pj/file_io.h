@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: file_io.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -62,7 +62,8 @@ enum pj_file_access
     PJ_O_WRONLY     = 0x1102,   /**< Open file for writing.             */
     PJ_O_RDWR       = 0x1103,   /**< Open file for reading and writing. 
                                      File will be truncated.            */
-    PJ_O_APPEND     = 0x1108    /**< Append to existing file.           */
+    PJ_O_APPEND     = 0x1108,   /**< Append to existing file.           */
+	PJ_O_SYSLOG     = 0x1110    /**< Write to sys log.                  */
 };
 
 /**
@@ -74,6 +75,20 @@ enum pj_file_seek_type
     PJ_SEEK_CUR     = 0x1202,   /**< Offset from current position.      */
     PJ_SEEK_END     = 0x1203    /**< Size of the file plus offset.      */
 };
+
+/**
+ * Set syslog facility. 
+ * The function must be called once before using pj_file_open, 
+ * pj_file_close or pj_file_write, if PJ_O_SYSLOG is set to log_file_flags.
+ * The write_to_syslog global variable is also set to PJ_TRUE, if this 
+ * function is called.
+ *
+ * @param facility      The facility of syslog. This argument is same as 
+ *                      the facility argument of openlog() API on linux.
+ *
+ * @return              PJ_SUCCESS or the appropriate error code on error.
+ */
+PJ_DEF(pj_status_t) pj_syslog_facility(int facility);
 
 /**
  * Open the file as specified in \c pathname with the specified
@@ -94,7 +109,8 @@ enum pj_file_seek_type
 PJ_DECL(pj_status_t) pj_file_open(pj_pool_t *pool,
                                   const char *pathname, 
                                   unsigned flags,
-                                  pj_oshandle_t *fd);
+								  pj_oshandle_t *fd,
+								  unsigned *size);
 
 /**
  * Close an opened file descriptor.

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: config.h 3884 2011-11-08 17:11:29Z bennylp $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -19,6 +19,7 @@
  */
 #ifndef __PJ_CONFIG_H__
 #define __PJ_CONFIG_H__
+
 
 /**
  * @file config.h
@@ -71,11 +72,49 @@
     /* Also define Win32 */
 #   define PJ_WIN32 1
 
-#elif defined(PJ_WIN32) || defined(_WIN32) || defined(__WIN32__) || \
-	defined(_WIN64) || defined(WIN32) || defined(__TOS_WIN__)
+#elif defined(PJ_WIN32_WINPHONE8) || defined(_WIN32_WINPHONE8)
     /*
-     * Win32
+     * Windows Phone 8
      */
+#   undef PJ_WIN32_WINPHONE8
+#   define PJ_WIN32_WINPHONE8   1
+#   include <pj/compat/os_winphone8.h>
+
+    /* Also define Win32 */
+#   define PJ_WIN32 1
+
+#elif defined(PJ_WIN32_UWP) || defined(_WIN32_UWP)
+    /*
+     * Windows UWP
+     */
+#   undef PJ_WIN32_UWP
+#   define PJ_WIN32_UWP   1
+#   include <pj/compat/os_winuwp.h>
+
+    /* Define Windows phone */
+#   define PJ_WIN32_WINPHONE8 1
+
+    /* Also define Win32 */
+#   define PJ_WIN32 1
+
+#   if defined(PJ_WIN64) || defined(_WIN64) || defined(WIN64)
+	/*
+	* Win64
+	*/
+#	undef PJ_WIN64
+#	define PJ_WIN64 1
+#   endif
+
+#elif defined(PJ_WIN32) || defined(_WIN32) || defined(__WIN32__) || \
+	defined(WIN32) || defined(PJ_WIN64) || defined(_WIN64) || \
+	defined(WIN64) || defined(__TOS_WIN__) 
+#   if defined(PJ_WIN64) || defined(_WIN64) || defined(WIN64)
+	/*
+	 * Win64
+	 */
+#	undef PJ_WIN64
+#	define PJ_WIN64 1
+#   endif
 #   undef PJ_WIN32
 #   define PJ_WIN32 1
 #   include <pj/compat/os_win32.h>
@@ -122,6 +161,12 @@
      * RTEMS
      */
 #  include <pj/compat/os_rtems.h>
+
+#elif defined(PJ_ANDROID )
+	/*
+	 *	Android
+	 */
+#	include <pj/compat/os_android.h>
 #else
 #   error "Please specify target os."
 #endif
@@ -151,7 +196,8 @@
 
 
 #elif defined (PJ_M_X86_64) || defined(__amd64__) || defined(__amd64) || \
-	defined(__x86_64__) || defined(__x86_64)
+	defined(__x86_64__) || defined(__x86_64) || \
+	defined(_M_X64) || defined(_M_AMD64)
     /*
      * AMD 64bit processor, little endian
      */
@@ -185,6 +231,20 @@
 #   define PJ_HAS_PENTIUM	0
 #   define PJ_IS_LITTLE_ENDIAN	0
 #   define PJ_IS_BIG_ENDIAN	1
+
+
+#elif defined (PJ_M_ARM) || defined (__arm__) || defined (__arm) || \
+	defined (_M_ARM)
+    /*
+     * DEC Alpha processor, little endian
+     */
+#   undef PJ_M_ARM
+#   define PJ_M_ARM		1
+#   define PJ_M_NAME		"arm"
+#   define PJ_HAS_PENTIUM	0
+#   if !PJ_IS_LITTLE_ENDIAN && !PJ_IS_BIG_ENDIAN
+#   	error Endianness must be declared for this processor
+#   endif
 
 
 #elif defined (PJ_M_ALPHA) || defined (__alpha__) || defined (__alpha) || \
@@ -387,7 +447,7 @@
  * Default: 4000
  */
 #ifndef PJ_LOG_MAX_SIZE
-#  define PJ_LOG_MAX_SIZE	    4000
+#  define PJ_LOG_MAX_SIZE	    6000
 #endif
 
 /**
@@ -439,6 +499,27 @@
  */
 #ifndef PJ_POOL_DEBUG
 #  define PJ_POOL_DEBUG		    0
+#endif
+
+
+/**
+ * Enable timer heap debugging facility. When this is enabled, application
+ * can call pj_timer_heap_dump() to show the contents of the timer heap
+ * along with the source location where the timer entries were scheduled.
+ * See https://trac.pjsip.org/repos/ticket/1527 for more info.
+ *
+ * Default: 0
+ */
+#ifndef PJ_TIMER_DEBUG
+#  define PJ_TIMER_DEBUG	    0
+#endif
+
+
+/**
+ * Set this to 1 to enable debugging on the group lock. Default: 0
+ */
+#ifndef PJ_GRP_LOCK_DEBUG
+#  define PJ_GRP_LOCK_DEBUG	0
 #endif
 
 
@@ -633,6 +714,17 @@
  */
 #ifndef PJ_IP_HELPER_IGNORE_LOOPBACK_IF
 #   define PJ_IP_HELPER_IGNORE_LOOPBACK_IF	1
+#endif
+
+
+/**
+ * Specify whether #pj_get_physical_address_by_ip() function should exclude
+ * point-to-point interfaces.
+ *
+ * Default: 1
+ */
+#ifndef PJ_IP_HELPER_IGNORE_POINT_TO_POINT_IF
+#   define PJ_IP_HELPER_IGNORE_POINT_TO_POINT_IF	1
 #endif
 
 
@@ -1074,6 +1166,14 @@
  */
 #ifndef PJ_TODO
 #  define PJ_TODO(id)	    TODO___##id:
+#endif
+
+/**
+ * Simulate race condition by sleeping the thread in strategic locations.
+ * Default: no!
+ */
+#ifndef PJ_RACE_ME
+#  define PJ_RACE_ME(x)
 #endif
 
 /**

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: tsx_bench.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -63,7 +63,7 @@ static int uac_tsx_bench(unsigned working_set, pj_timestamp *p_elapsed)
     elapsed.u64 = 0;
     pj_get_timestamp(&t1);
     for (i=0; i<working_set; ++i) {
-	status = pjsip_tsx_create_uac(&mod_tsx_user, request, &tsx[i]);
+	status = pjsip_tsx_create_uac(0, &mod_tsx_user, request, &tsx[i]);
 	if (status != PJ_SUCCESS)
 	    goto on_error;
 	/* Reset branch param */

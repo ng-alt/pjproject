@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: iscomposing.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -104,6 +104,7 @@ PJ_DECL(pjsip_msg_body*) pjsip_iscomposing_create_body( pj_pool_t *pool,
  * Parse the buffer and return message composition indication in the 
  * message.
  *
+ * @param inst_id       The instance id of pjsua.
  * @param pool		    Pool to allocate memory for the parsing process.
  * @param msg		    The message to be parsed.
  * @param len		    Length of the message.
@@ -114,7 +115,8 @@ PJ_DECL(pjsip_msg_body*) pjsip_iscomposing_create_body( pj_pool_t *pool,
  *
  * @return		    PJ_SUCCESS if message can be successfully parsed.
  */
-PJ_DECL(pj_status_t) pjsip_iscomposing_parse( pj_pool_t *pool,
+PJ_DECL(pj_status_t) pjsip_iscomposing_parse( int inst_id,
+						  pj_pool_t *pool,
 					      char *msg,
 					      pj_size_t len,
 					      pj_bool_t *p_is_composing,

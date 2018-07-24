@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: transport_loop.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -165,7 +165,8 @@ PJ_DEF(pj_status_t) pjmedia_transport_loop_disable_rx( pjmedia_transport *tp,
 	    return PJ_SUCCESS;
 	}
     }
-    pj_assert(!"Invalid stream user");
+	pj_assert(!"Invalid stream user");
+	PJ_LOG(4, ("transport_loop.c", "pjmedia_transport_loop_disable_rx() stream user not found."));
     return PJ_ENOTFOUND;
 }
 

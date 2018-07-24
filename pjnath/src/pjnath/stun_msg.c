@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: stun_msg.c 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -2241,6 +2241,29 @@ PJ_DEF(pj_status_t) pj_stun_msg_check(const pj_uint8_t *pdu, pj_size_t pdu_len,
     }
 
     /* Could be a STUN message */
+    return PJ_SUCCESS;
+}
+
+
+/*
+ * Check that the PDU is potentially a valid STUN message.
+ */
+PJ_DEF(pj_status_t) pj_dtls_record_check(const pj_uint8_t *pdu, pj_size_t pdu_len)
+{
+    PJ_ASSERT_RETURN(pdu, PJ_EINVAL);
+
+    if (pdu_len < 5)
+		return PJNATH_EINDTLSRECORD;
+
+    /* First byte of DTLS record is always 0x14, 0x15, 0x16 or 0x17. */
+    if (*pdu != 0x14 && *pdu != 0x15 && *pdu != 0x16 && *pdu != 0x17)
+		return PJNATH_EINDTLSRECORD;
+
+	/* Second and Third byte of DTLS record is always 0xfe and 0xff. */
+	if (*(pdu+1) != 0xfe && *(pdu+2) != 0xff)
+		return PJNATH_EINDTLSRECORD;
+
+    /* Could be a DTLS record */
     return PJ_SUCCESS;
 }
 

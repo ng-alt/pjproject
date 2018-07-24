@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $Id: sdp.h 3553 2011-05-05 06:14:19Z nanang $ */
 /* 
  * Copyright (C) 2008-2011 Teluu Inc. (http://www.teluu.com)
  * Copyright (C) 2003-2008 Benny Prijono <benny@prijono.org>
@@ -227,6 +227,7 @@ typedef struct pjmedia_sdp_rtpmap pjmedia_sdp_rtpmap;
  * Convert generic attribute to SDP \a rtpmap. This function allocates
  * a new attribute and call #pjmedia_sdp_attr_get_rtpmap().
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool		Pool used to create the rtpmap attribute.
  * @param attr		Generic attribute to be converted to rtpmap, which
  *			name must be "rtpmap".
@@ -237,7 +238,8 @@ typedef struct pjmedia_sdp_rtpmap pjmedia_sdp_rtpmap;
  *
  * @see pjmedia_sdp_attr_get_rtpmap
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_attr_to_rtpmap(pj_pool_t *pool,
+PJ_DECL(pj_status_t) pjmedia_sdp_attr_to_rtpmap(int inst_id, 
+						pj_pool_t *pool,
 						const pjmedia_sdp_attr *attr,
 						pjmedia_sdp_rtpmap **p_rtpmap);
 
@@ -245,6 +247,7 @@ PJ_DECL(pj_status_t) pjmedia_sdp_attr_to_rtpmap(pj_pool_t *pool,
 /**
  * Get the rtpmap representation of the same SDP attribute.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param attr		Generic attribute to be converted to rtpmap, which
  *			name must be "rtpmap".
  * @param rtpmap	SDP \a rtpmap attribute to be initialized.
@@ -254,7 +257,8 @@ PJ_DECL(pj_status_t) pjmedia_sdp_attr_to_rtpmap(pj_pool_t *pool,
  *
  * @see pjmedia_sdp_attr_to_rtpmap
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_attr_get_rtpmap(const pjmedia_sdp_attr *attr,
+PJ_DECL(pj_status_t) pjmedia_sdp_attr_get_rtpmap(int inst_id, 
+						 const pjmedia_sdp_attr *attr,
 						 pjmedia_sdp_rtpmap *rtpmap);
 
 
@@ -318,13 +322,15 @@ typedef struct pjmedia_sdp_rtcp_attr
 /**
  * Parse a generic SDP attribute to get SDP rtcp attribute values.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param attr		Generic attribute to be converted to rtcp, which
  *			name must be "rtcp".
  * @param rtcp		SDP rtcp attribute to be initialized.
  *
  * @return		PJ_SUCCESS on success.
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_attr_get_rtcp(const pjmedia_sdp_attr *attr,
+PJ_DECL(pj_status_t) pjmedia_sdp_attr_get_rtcp(int inst_id, 
+						   const pjmedia_sdp_attr *attr,
 					       pjmedia_sdp_rtcp_attr *rtcp);
 
 
@@ -418,7 +424,7 @@ struct pjmedia_sdp_media
     /** Media descriptor line ("m=" line) */
     struct
     {
-	pj_str_t    media;		/**< Media type ("audio", "video")  */
+	pj_str_t    media;		/**< Media type ("audio", "video", "application")  dean : application is WebRTC data channel*/ 
 	pj_uint16_t port;		/**< Port number.		    */
 	unsigned    port_count;		/**< Port count, used only when >2  */
 	pj_str_t    transport;		/**< Transport ("RTP/AVP")	    */
@@ -531,6 +537,7 @@ pjmedia_sdp_media_remove_attr(pjmedia_sdp_media *m,
 /**
  * Compare two SDP media for equality.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param sd1	    The first SDP media to compare.
  * @param sd2	    The second SDP media to compare.
  * @param option    Comparison option, which should be zero for now.
@@ -539,7 +546,8 @@ pjmedia_sdp_media_remove_attr(pjmedia_sdp_media *m,
  *		    appropriate status code describing which part of
  *		    the descriptors that are not equal.
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_media_cmp(const pjmedia_sdp_media *sd1,
+PJ_DECL(pj_status_t) pjmedia_sdp_media_cmp(int inst_id, 
+					   const pjmedia_sdp_media *sd1,
 					   const pjmedia_sdp_media *sd2,
 					   unsigned option);
 
@@ -623,6 +631,9 @@ struct pjmedia_sdp_session
     unsigned	       media_count;		/**< Number of media.	    */
     pjmedia_sdp_media *media[PJMEDIA_MAX_SDP_MEDIA];	/**< Media array.   */
 
+	int disable_compress;   /*DEAN 0: do bzip2 compress, 1: plain text*/
+
+	pj_str_t           inv_cid; // INVITE CALL-ID for turn authenticate.
 };
 
 /**
@@ -635,6 +646,7 @@ typedef struct pjmedia_sdp_session pjmedia_sdp_session;
 /**
  * Parse SDP message.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param pool	    The pool to allocate SDP session description.
  * @param buf	    The message buffer.
  * @param len	    The length of the message.
@@ -643,8 +655,9 @@ typedef struct pjmedia_sdp_session pjmedia_sdp_session;
  * @return	    PJ_SUCCESS if message was successfully parsed into
  *		    SDP session descriptor.
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_parse( pj_pool_t *pool,
-				        char *buf, pj_size_t len, 
+PJ_DECL(pj_status_t) pjmedia_sdp_parse( int inst_id,
+					pj_pool_t *pool,
+				    char **buf, pj_size_t *len, 
 					pjmedia_sdp_session **p_sdp );
 
 /**
@@ -691,6 +704,7 @@ pjmedia_sdp_session_clone( pj_pool_t *pool,
 /**
  * Compare two SDP session for equality.
  *
+ * @param inst_id   The instance id of pjsua.
  * @param sd1	    The first SDP session to compare.
  * @param sd2	    The second SDP session to compare.
  * @param option    Must be zero for now.
@@ -699,7 +713,8 @@ pjmedia_sdp_session_clone( pj_pool_t *pool,
  *		    the status code indicates which part of the session
  *		    descriptors are not equal.
  */
-PJ_DECL(pj_status_t) pjmedia_sdp_session_cmp(const pjmedia_sdp_session *sd1,
+PJ_DECL(pj_status_t) pjmedia_sdp_session_cmp(int inst_id, 
+						 const pjmedia_sdp_session *sd1,
 					     const pjmedia_sdp_session *sd2,
 					     unsigned option);
 
